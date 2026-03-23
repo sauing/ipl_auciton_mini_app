@@ -1,0 +1,8 @@
+{
+  "api_base": "https://your-api-base-url",
+  "api_token": "YOUR_API_TOKEN_HERE",
+  "ui_base_url": "https://your-ui-base-url"
+  // Add other config keys as needed for your project
+}
+// Rename this file to dev.json, qa.json, etc. and fill in your environment-specific values.
+

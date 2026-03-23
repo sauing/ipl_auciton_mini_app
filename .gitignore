@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Playwright & Allure
+playwright-report/
+allure-results/
+allure-report/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+.git
