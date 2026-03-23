@@ -1,8 +1,0 @@
-{
-  "env": "qa",
-  "api_base": "https://fakestoreapi.com",
-  "web_base": "https://www.saucedemo.com",
-  "user": "standard_user",
-  "pass": "secret_sauce",
-  "api_token": ""
-}
