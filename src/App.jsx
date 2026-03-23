@@ -20,7 +20,7 @@ function App() {
       <Route path="/auction/:leagueId" element={<AuctionRoom />} />
       <Route path="/league/:leagueId/team/:memberId" element={<TeamPage />} />
       <Route path="/league/:leagueId/leaderboard" element={<Leaderboard />} />
-      <Route path="/league/:leagueId/winner" element={<WinnerPage />} />
+      <Route path="/winner/:leagueId" element={<WinnerPage />} />
     </Routes>
   )
 }
