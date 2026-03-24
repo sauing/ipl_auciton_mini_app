@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 
@@ -9,6 +9,15 @@ export default function JoinLeague() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [joinedLeague, setJoinedLeague] = useState(null)
+  useEffect(() => {
+    const storedUser = JSON.parse(localStorage.getItem('auction_user'))
+    const storedLeague = JSON.parse(localStorage.getItem('joined_league'))
+  
+    if (storedUser && storedLeague && storedUser.leagueId === storedLeague.id) {
+      setJoinedLeague(storedLeague)
+      setMessage(`Welcome back to ${storedLeague.league_name}`)
+    }
+  }, [])
 
   const handleJoinLeague = async () => {
     if (!userName.trim() || !joinCode.trim()) {
@@ -56,8 +65,21 @@ export default function JoinLeague() {
             role: existingMember.role || 'member',
           })
         )
-  
-        setJoinedLeague(leagueData)
+        
+        localStorage.setItem(
+          'joined_league',
+          JSON.stringify({
+            id: leagueData.id,
+            league_name: leagueData.league_name,
+            join_code: leagueData.join_code,
+          })
+        )
+        
+        setJoinedLeague({
+          id: leagueData.id,
+          league_name: leagueData.league_name,
+          join_code: leagueData.join_code,
+        })
         setMessage(`Welcome back, ${existingMember.user_name}`)
         setUserName('')
         setJoinCode('')
