@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 
 export default function JoinLeague() {
+  const navigate = useNavigate()
   const [userName, setUserName] = useState('')
   const [joinCode, setJoinCode] = useState('')
   const [loading, setLoading] = useState(false)
@@ -129,12 +130,32 @@ export default function JoinLeague() {
         )}
 
         {joinedLeague && (
-          <Link
-            to={`/league/${joinedLeague.id}`}
-            className="mt-4 block rounded bg-black px-4 py-3 text-center text-white"
-          >
-            Go to League Lobby
-          </Link>
+          <div className="mt-4 space-y-3">
+            {/* Go to Lobby */}
+            <Link
+              to={`/league/${joinedLeague.id}`}
+              className="block rounded bg-black px-4 py-3 text-center text-white"
+            >
+              Go to League Lobby
+            </Link>
+
+            {/* New Buttons */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <button
+                onClick={() => navigate(`/fantasy-import/${joinedLeague.id}`)}
+                className="rounded bg-green-700 px-4 py-3 text-white"
+              >
+                Fantasy Import
+              </button>
+
+              <button
+                onClick={() => navigate(`/leaderboard`)}
+                className="rounded bg-indigo-600 px-4 py-3 text-white"
+              >
+                Leaderboard
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

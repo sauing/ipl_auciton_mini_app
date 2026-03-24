@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../supabase'
 
 export default function AuctionRoom() {
   const { leagueId } = useParams()
+  const navigate = useNavigate()
 
   const [players, setPlayers] = useState([])
   const [members, setMembers] = useState([])
@@ -105,6 +106,7 @@ export default function AuctionRoom() {
 
       if (!nextPlayer) {
         setMessage('No players left')
+        navigate(`/winner/${leagueId}`)
         return
       }
 
@@ -150,9 +152,14 @@ export default function AuctionRoom() {
   const placeBid = async (member) => {
     try {
       if (!auction) return
-      
+
       if (currentUser?.memberId !== member.id) {
         setMessage('You can only bid for yourself')
+        return
+      }
+
+      if (auction.status !== 'live') {
+        setMessage('Bidding is closed for this player')
         return
       }
 
@@ -291,7 +298,15 @@ export default function AuctionRoom() {
       const next = availablePlayers[0]
 
       if (!next) {
-        setMessage('No more available players')
+        await supabase
+          .from('auction_state')
+          .update({
+            status: 'finished',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', auction.id)
+
+        navigate(`/winner/${leagueId}`)
         return
       }
 
@@ -332,27 +347,27 @@ export default function AuctionRoom() {
     <div className="min-h-screen bg-gray-100 p-6">
       <div className="mx-auto max-w-4xl rounded-xl bg-white p-6 shadow">
         <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-black">Auction Room</h1>
+          <h1 className="text-3xl font-bold text-black">Auction Room</h1>
 
-        <div className="flex gap-3">
-        <a
-            href={`/league/${leagueId}`}
-            className="rounded bg-blue-600 px-4 py-2 text-white"
-        >
-            Go to Lobby
-        </a>
+          <div className="flex gap-3">
+            <Link
+              to={`/league/${leagueId}`}
+              className="rounded bg-blue-600 px-4 py-2 text-white"
+            >
+              Go to Lobby
+            </Link>
 
-        <button
-            onClick={() => {
-            localStorage.removeItem('auction_user')
-            window.location.href = '/'
-            }}
-            className="rounded bg-red-600 px-4 py-2 text-white"
-        >
-            Logout
-        </button>
+            <button
+              onClick={() => {
+                localStorage.removeItem('auction_user')
+                window.location.href = '/'
+              }}
+              className="rounded bg-red-600 px-4 py-2 text-white"
+            >
+              Logout
+            </button>
+          </div>
         </div>
-    </div>
 
         {!auction ? (
           currentUser?.role === 'admin' ? (
@@ -390,38 +405,44 @@ export default function AuctionRoom() {
               <p className="text-black">
                 Status: {auction.status}
               </p>
+
+              {auction?.status === 'finished' && (
+                <p className="mt-2 text-lg font-bold text-green-600">
+                  🎉 Auction Completed
+                </p>
+              )}
             </div>
 
             <div className="mb-6">
-                <h3 className="mb-3 text-lg font-semibold text-black">Members</h3>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    {members.map((member) => {
-                    const isCurrentUser = currentUser?.memberId === member.id
+              <h3 className="mb-3 text-lg font-semibold text-black">Members</h3>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                {members.map((member) => {
+                  const isCurrentUser = currentUser?.memberId === member.id
 
-                    return (
-                        <div
-                        key={member.id}
-                        className={`rounded p-3 text-white ${
-                            isCurrentUser ? 'bg-blue-600' : 'bg-gray-500'
-                        }`}
+                  return (
+                    <div
+                      key={member.id}
+                      className={`rounded p-3 text-white ${
+                        isCurrentUser ? 'bg-blue-600' : 'bg-gray-500'
+                      }`}
+                    >
+                      <div className="font-semibold">{member.user_name}</div>
+                      <div className="mb-2 text-sm">Budget: {member.budget_remaining}</div>
+
+                      {isCurrentUser ? (
+                        <button
+                          onClick={() => placeBid(member)}
+                          className="rounded bg-white px-3 py-1 font-semibold text-blue-700"
                         >
-                        <div className="font-semibold">{member.user_name}</div>
-                        <div className="text-sm mb-2">Budget: {member.budget_remaining}</div>
-
-                        {isCurrentUser ? (
-                            <button
-                            onClick={() => placeBid(member)}
-                            className="rounded bg-white px-3 py-1 text-blue-700 font-semibold"
-                            >
-                            Place My Bid
-                            </button>
-                        ) : (
-                            <div className="text-sm opacity-90">Only this user can bid</div>
-                        )}
-                        </div>
-                    )
-                    })}
-                </div>
+                          Place My Bid
+                        </button>
+                      ) : (
+                        <div className="text-sm opacity-90">Only this user can bid</div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             </div>
 
             {currentUser?.role === 'admin' && (
@@ -446,15 +467,6 @@ export default function AuctionRoom() {
 
         {message && <p className="mt-4 font-medium text-red-600">{message}</p>}
       </div>
-      <button
-        onClick={() => {
-            localStorage.removeItem('auction_user')
-            window.location.href = '/'
-        }}
-        className="mt-6 rounded bg-red-600 px-4 py-2 text-white"
-        >
-        Logout
-    </button>
     </div>
   )
 }
