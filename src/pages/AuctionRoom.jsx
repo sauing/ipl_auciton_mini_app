@@ -18,19 +18,20 @@ export default function AuctionRoom() {
     fetchInitialData()
 
     const channel = supabase
-      .channel(`auction-room-${leagueId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'auction_state',
-        },
-        () => {
-          fetchInitialData()
-        }
-      )
-      .subscribe()
+    .channel(`auction-room-${leagueId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'auction_state',
+        filter: `league_id=eq.${leagueId}`,
+      },
+      () => {
+        fetchInitialData()
+      }
+    )
+    .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
