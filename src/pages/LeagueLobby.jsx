@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 
 export default function LeagueLobby() {
   const { leagueId } = useParams()
+  const navigate = useNavigate()
+
   const [league, setLeague] = useState(null)
   const [members, setMembers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -13,6 +15,61 @@ export default function LeagueLobby() {
   useEffect(() => {
     fetchLeagueData()
   }, [leagueId])
+
+  useEffect(() => {
+    const checkAuctionState = async () => {
+      const { data, error } = await supabase
+        .from('auction_state')
+        .select('*')
+        .eq('league_id', leagueId)
+        .maybeSingle()
+
+      if (error) {
+        console.error('Auction state fetch error:', error)
+        return
+      }
+
+      if (data?.status === 'live' || data?.status === 'sold') {
+        navigate(`/auction/${leagueId}`)
+        return
+      }
+
+      if (data?.status === 'finished') {
+        navigate(`/winner/${leagueId}`)
+      }
+    }
+
+    checkAuctionState()
+
+    const channel = supabase
+      .channel(`league-lobby-${leagueId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'auction_state',
+          filter: `league_id=eq.${leagueId}`,
+        },
+        (payload) => {
+          const updatedAuction = payload.new
+
+          if (updatedAuction?.status === 'live' || updatedAuction?.status === 'sold') {
+            navigate(`/auction/${leagueId}`)
+            return
+          }
+
+          if (updatedAuction?.status === 'finished') {
+            navigate(`/winner/${leagueId}`)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [leagueId, navigate])
 
   const fetchLeagueData = async () => {
     try {
@@ -113,12 +170,12 @@ export default function LeagueLobby() {
             >
               Leaderboard
             </Link>
-            
+
             <Link
-                to={`/league/${leagueId}/winner`}
-                className="rounded bg-green-700 px-4 py-2 text-white"
-                >
-                Winner Screen
+              to={`/league/${leagueId}/winner`}
+              className="rounded bg-green-700 px-4 py-2 text-white"
+            >
+              Winner Screen
             </Link>
 
             <button
@@ -139,9 +196,7 @@ export default function LeagueLobby() {
           </h2>
         </div>
 
-        {message && (
-          <p className="mb-4 text-red-600">{message}</p>
-        )}
+        {message && <p className="mb-4 text-red-600">{message}</p>}
 
         {members.length === 0 ? (
           <p className="text-gray-600">No members joined yet.</p>
