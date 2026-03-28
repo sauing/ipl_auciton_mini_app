@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 
@@ -12,66 +12,7 @@ export default function LeagueLobby() {
   const [message, setMessage] = useState('')
   const [currentUser, setCurrentUser] = useState(null)
 
-  useEffect(() => {
-    fetchLeagueData()
-  }, [leagueId])
-
-  useEffect(() => {
-    const checkAuctionState = async () => {
-      const { data, error } = await supabase
-        .from('auction_state')
-        .select('*')
-        .eq('league_id', leagueId)
-        .maybeSingle()
-
-      if (error) {
-        console.error('Auction state fetch error:', error)
-        return
-      }
-
-      if (data?.status === 'live' || data?.status === 'sold') {
-        navigate(`/auction/${leagueId}`)
-        return
-      }
-
-      if (data?.status === 'finished') {
-        navigate(`/winner/${leagueId}`)
-      }
-    }
-
-    checkAuctionState()
-
-    const channel = supabase
-      .channel(`league-lobby-${leagueId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'auction_state',
-          filter: `league_id=eq.${leagueId}`,
-        },
-        (payload) => {
-          const updatedAuction = payload.new
-
-          if (updatedAuction?.status === 'live' || updatedAuction?.status === 'sold') {
-            navigate(`/auction/${leagueId}`)
-            return
-          }
-
-          if (updatedAuction?.status === 'finished') {
-            navigate(`/winner/${leagueId}`)
-          }
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [leagueId, navigate])
-
-  const fetchLeagueData = async () => {
+  const fetchLeagueData = useCallback(async () => {
     try {
       setLoading(true)
       setMessage('')
@@ -103,6 +44,156 @@ export default function LeagueLobby() {
       setMessage(`Error: ${error.message}`)
     } finally {
       setLoading(false)
+    }
+  }, [leagueId])
+
+  useEffect(() => {
+    fetchLeagueData()
+  }, [fetchLeagueData])
+
+  useEffect(() => {
+    const checkAuctionState = async () => {
+      const { data, error } = await supabase
+        .from('auction_state')
+        .select('*')
+        .eq('league_id', leagueId)
+        .maybeSingle()
+
+      if (error) {
+        console.error('Auction state fetch error:', error)
+        return
+      }
+
+      // ONLY redirect when auction is actually live
+      if (data?.status === 'live') {
+        navigate(`/auction/${leagueId}`)
+        return
+      }
+
+      if (data?.status === 'finished') {
+        navigate(`/winner/${leagueId}`)
+      }
+    }
+
+    checkAuctionState()
+
+    const auctionChannel = supabase
+      .channel(`league-lobby-auction-${leagueId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'auction_state',
+          filter: `league_id=eq.${leagueId}`,
+        },
+        (payload) => {
+          const updatedAuction = payload.new
+
+          // ONLY redirect when auction becomes live
+          if (updatedAuction?.status === 'live') {
+            navigate(`/auction/${leagueId}`)
+            return
+          }
+
+          if (updatedAuction?.status === 'finished') {
+            navigate(`/winner/${leagueId}`)
+          }
+        }
+      )
+      .subscribe()
+
+    const memberChannel = supabase
+      .channel(`league-lobby-members-${leagueId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'league_members',
+          filter: `league_id=eq.${leagueId}`,
+        },
+        () => {
+          fetchLeagueData()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(auctionChannel)
+      supabase.removeChannel(memberChannel)
+    }
+  }, [leagueId, navigate, fetchLeagueData])
+
+  const handleStartAuction = async () => {
+    try {
+      setMessage('')
+
+      if (currentUser?.role !== 'admin') {
+        setMessage('Only admin can start the auction')
+        return
+      }
+
+      const { data: auctionData, error: auctionError } = await supabase
+        .from('auction_state')
+        .select('*')
+        .eq('league_id', leagueId)
+        .maybeSingle()
+
+      if (auctionError) throw auctionError
+
+      if (auctionData?.status === 'live') {
+        setMessage('Auction is already live')
+        return
+      }
+
+      const { data: playerData, error: playerError } = await supabase
+        .from('players')
+        .select('*')
+        .eq('is_sold', false)
+        .order('base_price', { ascending: false })
+
+      if (playerError) throw playerError
+
+      const nextPlayer = playerData?.[0]
+
+      if (!nextPlayer) {
+        setMessage('No players left to auction')
+        return
+      }
+
+      if (auctionData) {
+        const { error: updateError } = await supabase
+          .from('auction_state')
+          .update({
+            current_player_id: nextPlayer.id,
+            current_bid: nextPlayer.base_price,
+            current_bidder_id: null,
+            status: 'live',
+            expires_at: new Date(Date.now() + 15000).toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', auctionData.id)
+
+        if (updateError) throw updateError
+      } else {
+        const { error: insertError } = await supabase
+          .from('auction_state')
+          .insert([
+            {
+              league_id: leagueId,
+              current_player_id: nextPlayer.id,
+              current_bid: nextPlayer.base_price,
+              current_bidder_id: null,
+              status: 'live',
+              expires_at: new Date(Date.now() + 15000).toISOString(),
+            },
+          ])
+
+        if (insertError) throw insertError
+      }
+    } catch (error) {
+      setMessage(`Error: ${error.message}`)
     }
   }
 
@@ -148,12 +239,12 @@ export default function LeagueLobby() {
           <div className="flex flex-wrap gap-3">
             {currentUser?.role === 'admin' && (
               <>
-                <Link
-                  to={`/auction/${leagueId}`}
+                <button
+                  onClick={handleStartAuction}
                   className="rounded bg-red-600 px-4 py-2 text-white"
                 >
                   Start Auction
-                </Link>
+                </button>
 
                 <Link
                   to="/auction-setup"
@@ -181,6 +272,7 @@ export default function LeagueLobby() {
             <button
               onClick={() => {
                 localStorage.removeItem('auction_user')
+                localStorage.removeItem('joined_league')
                 window.location.href = '/'
               }}
               className="rounded bg-gray-700 px-4 py-2 text-white"

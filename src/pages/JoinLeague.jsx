@@ -9,10 +9,11 @@ export default function JoinLeague() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [joinedLeague, setJoinedLeague] = useState(null)
+
   useEffect(() => {
     const storedUser = JSON.parse(localStorage.getItem('auction_user'))
     const storedLeague = JSON.parse(localStorage.getItem('joined_league'))
-  
+
     if (storedUser && storedLeague && storedUser.leagueId === storedLeague.id) {
       setJoinedLeague(storedLeague)
       setMessage(`Welcome back to ${storedLeague.league_name}`)
@@ -24,37 +25,37 @@ export default function JoinLeague() {
       setMessage('Please enter your name and join code')
       return
     }
-  
+
     try {
       setLoading(true)
       setMessage('')
       setJoinedLeague(null)
-  
+
       const cleanJoinCode = joinCode.trim().toUpperCase()
       const cleanUserName = userName.trim()
-  
+
       const { data: leagueData, error: leagueError } = await supabase
         .from('leagues')
         .select('*')
         .eq('join_code', cleanJoinCode)
         .single()
-  
+
       if (leagueError || !leagueData) {
         setMessage('Invalid join code')
         return
       }
-  
+
       const { data: existingMember, error: existingMemberError } = await supabase
         .from('league_members')
         .select('*')
         .eq('league_id', leagueData.id)
         .ilike('user_name', cleanUserName)
         .maybeSingle()
-  
+
       if (existingMemberError) {
         throw existingMemberError
       }
-  
+
       if (existingMember) {
         localStorage.setItem(
           'auction_user',
@@ -65,7 +66,7 @@ export default function JoinLeague() {
             role: existingMember.role || 'member',
           })
         )
-        
+
         localStorage.setItem(
           'joined_league',
           JSON.stringify({
@@ -74,7 +75,7 @@ export default function JoinLeague() {
             join_code: leagueData.join_code,
           })
         )
-        
+
         setJoinedLeague({
           id: leagueData.id,
           league_name: leagueData.league_name,
@@ -85,7 +86,7 @@ export default function JoinLeague() {
         setJoinCode('')
         return
       }
-  
+
       const { data: newMember, error: memberError } = await supabase
         .from('league_members')
         .insert([
@@ -95,19 +96,33 @@ export default function JoinLeague() {
           },
         ])
         .select()
-  
+
       if (memberError) throw memberError
-  
+
       localStorage.setItem(
         'auction_user',
         JSON.stringify({
           leagueId: leagueData.id,
           memberId: newMember[0].id,
           name: cleanUserName,
+          role: newMember[0].role || 'member',
         })
       )
-  
-      setJoinedLeague(leagueData)
+
+      localStorage.setItem(
+        'joined_league',
+        JSON.stringify({
+          id: leagueData.id,
+          league_name: leagueData.league_name,
+          join_code: leagueData.join_code,
+        })
+      )
+
+      setJoinedLeague({
+        id: leagueData.id,
+        league_name: leagueData.league_name,
+        join_code: leagueData.join_code,
+      })
       setMessage(`Joined league successfully: ${leagueData.league_name}`)
       setUserName('')
       setJoinCode('')
@@ -153,7 +168,6 @@ export default function JoinLeague() {
 
         {joinedLeague && (
           <div className="mt-4 space-y-3">
-            {/* Go to Lobby */}
             <Link
               to={`/league/${joinedLeague.id}`}
               className="block rounded bg-black px-4 py-3 text-center text-white"
@@ -161,7 +175,6 @@ export default function JoinLeague() {
               Go to League Lobby
             </Link>
 
-            {/* New Buttons */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <button
                 onClick={() => navigate(`/fantasy-import/${joinedLeague.id}`)}
@@ -177,6 +190,18 @@ export default function JoinLeague() {
                 Leaderboard
               </button>
             </div>
+
+            <button
+              onClick={() => {
+                localStorage.removeItem('auction_user')
+                localStorage.removeItem('joined_league')
+                setJoinedLeague(null)
+                setMessage('Logged out successfully')
+              }}
+              className="w-full rounded bg-red-600 px-4 py-3 text-white"
+            >
+              Logout
+            </button>
           </div>
         )}
       </div>
