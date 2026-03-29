@@ -502,6 +502,107 @@ export default function FantasyImport() {
         {matchSummary && (
           <div className="bg-white rounded-2xl shadow-md p-6 mb-6">
             <h2 className="text-2xl font-semibold mb-4">Match Summary</h2>
+            {matchSummary && selectedLiveMatch && verification && (
+            <div
+              className={`bg-white rounded-2xl shadow-md p-6 mb-6 border ${
+                verification.status === "matched"
+                  ? "border-green-200 bg-green-50"
+                  : verification.status === "mismatch"
+                  ? "border-red-200 bg-red-50"
+                  : "border-yellow-200 bg-yellow-50"
+              }`}
+            >
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-2xl font-semibold">Match Verification</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Compare uploaded Cricsheet match with selected live match before saving.
+                  </p>
+                </div>
+
+                <span
+                  className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
+                    verification.status === "matched"
+                      ? "bg-green-100 text-green-700"
+                      : verification.status === "mismatch"
+                      ? "bg-red-100 text-red-700"
+                      : "bg-yellow-100 text-yellow-700"
+                  }`}
+                >
+                  {verification.status === "matched"
+                    ? "Verified"
+                    : verification.status === "mismatch"
+                    ? "Possible mismatch"
+                    : "Check before save"}
+                </span>
+              </div>
+
+              {verification.status === "matched" && (
+                <div className="mb-4 rounded-lg bg-green-100 p-3 text-green-800">
+                  Looks good. Uploaded Cricsheet file and selected live match seem to match.
+                </div>
+              )}
+
+              {verification.status === "warning" && (
+                <div className="mb-4 rounded-lg bg-yellow-100 p-3 text-yellow-800">
+                  Partial match found. Please review once before saving.
+                </div>
+              )}
+
+              {verification.status === "mismatch" && (
+                <div className="mb-4 rounded-lg bg-red-100 p-3 text-red-800">
+                  Warning: selected live match may not match the uploaded Cricsheet file.
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div className="rounded-xl bg-white p-4 border">
+                  <p className="font-semibold mb-2">Teams</p>
+                  <p>
+                    <span className="font-semibold">Cricsheet:</span>{" "}
+                    {verification.cricsheetTeams.join(" vs ") || "N/A"}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Live:</span>{" "}
+                    {verification.liveTeams.join(" vs ") || "N/A"}
+                  </p>
+                  <p className={`mt-2 font-medium ${verification.teamsMatched ? "text-green-700" : "text-red-700"}`}>
+                    {verification.teamsMatched ? "Teams matched" : "Teams did not match"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-white p-4 border">
+                  <p className="font-semibold mb-2">Date</p>
+                  <p>
+                    <span className="font-semibold">Cricsheet:</span>{" "}
+                    {verification.cricsheetDate || "N/A"}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Live:</span>{" "}
+                    {verification.liveDate || "N/A"}
+                  </p>
+                  <p className={`mt-2 font-medium ${verification.dateMatched ? "text-green-700" : "text-red-700"}`}>
+                    {verification.dateMatched ? "Date matched" : "Date did not match"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-white p-4 border">
+                  <p className="font-semibold mb-2">Event / Match Name</p>
+                  <p>
+                    <span className="font-semibold">Cricsheet:</span>{" "}
+                    {verification.cricsheetEventName || "N/A"}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Live:</span>{" "}
+                    {verification.liveMatchName || "N/A"}
+                  </p>
+                  <p className={`mt-2 font-medium ${verification.eventMatched ? "text-green-700" : "text-red-700"}`}>
+                    {verification.eventMatched ? "Event looks similar" : "Event looks different"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
               <div className="rounded-xl bg-gray-50 p-4 border">
