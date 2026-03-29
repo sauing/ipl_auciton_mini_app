@@ -64,14 +64,8 @@ export default function LeagueLobby() {
         return
       }
 
-      // ONLY redirect when auction is actually live
       if (data?.status === 'live') {
         navigate(`/auction/${leagueId}`)
-        return
-      }
-
-      if (data?.status === 'finished') {
-        navigate(`/winner/${leagueId}`)
       }
     }
 
@@ -90,14 +84,8 @@ export default function LeagueLobby() {
         (payload) => {
           const updatedAuction = payload.new
 
-          // ONLY redirect when auction becomes live
           if (updatedAuction?.status === 'live') {
             navigate(`/auction/${leagueId}`)
-            return
-          }
-
-          if (updatedAuction?.status === 'finished') {
-            navigate(`/winner/${leagueId}`)
           }
         }
       )
