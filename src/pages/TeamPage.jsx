@@ -131,19 +131,14 @@ export default function TeamPage() {
   const remainingBudget =
     member?.budget_remaining ?? Math.max(0, 100 - totalSpent);
 
-  function handleBack() {
-    if (leagueId && !isOwnTeam) {
-      navigate(`/league/${leagueId}/leaderboard`);
-      return;
+    function handleBack() {
+      if (!isOwnTeam) {
+        navigate("/leaderboard");
+        return;
+      }
+  
+      navigate("/join");
     }
-
-    if (leagueId) {
-      navigate(`/league/${leagueId}`);
-      return;
-    }
-
-    navigate("/join");
-  }
 
   if (loading) {
     return (

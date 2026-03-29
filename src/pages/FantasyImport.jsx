@@ -16,6 +16,7 @@ export default function FantasyImport() {
   const [isAdmin, setIsAdmin] = useState(false);
 
   const [fileName, setFileName] = useState("");
+  const [uploadSource, setUploadSource] = useState("");
   const [matchSummary, setMatchSummary] = useState(null);
   const [playersWithPoints, setPlayersWithPoints] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -112,9 +113,11 @@ export default function FantasyImport() {
     const matchId = e.target.value;
     setSelectedLiveMatchId(matchId);
 
-    const foundMatch = liveMatches.find((match) => match.id === matchId) || null;
+    const foundMatch =
+      liveMatches.find((match) => String(match.id) === String(matchId)) || null;
     setSelectedLiveMatch(foundMatch);
   }
+
   function normalizeText(value) {
     return String(value || "")
       .toLowerCase()
@@ -188,6 +191,61 @@ export default function FantasyImport() {
   function getLiveMatchName(match) {
     return match?.name || match?.series || match?.matchType || "";
   }
+
+  function isManualFantasyJson(jsonData) {
+    return (
+      jsonData &&
+      typeof jsonData === "object" &&
+      jsonData.matchSummary &&
+      Array.isArray(jsonData.playersWithPoints)
+    );
+  }
+
+  function toNumber(value, fallback = 0) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : fallback;
+  }
+
+  function parseManualFantasyJson(jsonData) {
+    const summary = {
+      match_type: jsonData?.matchSummary?.match_type || "t20",
+      date: jsonData?.matchSummary?.date || "",
+      venue: jsonData?.matchSummary?.venue || "",
+      city: jsonData?.matchSummary?.city || "",
+      teams: Array.isArray(jsonData?.matchSummary?.teams)
+        ? jsonData.matchSummary.teams
+        : [],
+      event_name: jsonData?.matchSummary?.event_name || "",
+      winner: jsonData?.matchSummary?.winner || null,
+    };
+
+    const players = (jsonData.playersWithPoints || [])
+      .map((player) => {
+        const originalName = player.player_name || "";
+        return {
+          ...player,
+          player_name: originalName,
+          cricsheet_player_name: player.cricsheet_player_name || originalName,
+          normalized_player_name: normalizePlayerName(originalName),
+          runs: toNumber(player.runs),
+          wickets: toNumber(player.wickets),
+          catches: toNumber(player.catches),
+          stumpings: toNumber(player.stumpings),
+          runouts: toNumber(player.runouts ?? player.run_outs),
+          fantasy_points: toNumber(player.fantasy_points),
+        };
+      })
+      .filter((player) => player.player_name)
+      .sort((a, b) => b.fantasy_points - a.fantasy_points);
+
+    return {
+      matchSummary: summary,
+      playersWithPoints: players,
+      rawJson: jsonData,
+      source: jsonData?.source || "manual",
+    };
+  }
+
   const handleFileUpload = async (e) => {
     try {
       const file = e.target.files[0];
@@ -195,9 +253,34 @@ export default function FantasyImport() {
 
       setLoading(true);
       setFileName(file.name);
+      setSaveMessage("");
+      setSaveError("");
+      setSaveSummary(null);
 
       const text = await file.text();
       const jsonData = JSON.parse(text);
+
+      if (isManualFantasyJson(jsonData)) {
+        const parsedManual = parseManualFantasyJson(jsonData);
+
+        setUploadSource(parsedManual.source);
+        setMatchSummary(parsedManual.matchSummary);
+        setPlayersWithPoints(parsedManual.playersWithPoints);
+        setRawJson(parsedManual.rawJson);
+
+        console.log("Manual / provisional JSON loaded:", parsedManual.matchSummary);
+        console.table(
+          parsedManual.playersWithPoints.map((p) => ({
+            player_name: p.player_name,
+            runs: p.runs,
+            wickets: p.wickets,
+            catches: p.catches,
+            fantasy_points: p.fantasy_points,
+          }))
+        );
+
+        return;
+      }
 
       const parsedResult = parseCricsheetMatch(jsonData);
 
@@ -209,14 +292,12 @@ export default function FantasyImport() {
         }))
         .sort((a, b) => b.fantasy_points - a.fantasy_points);
 
+      setUploadSource("cricsheet");
       setMatchSummary(parsedResult.matchSummary);
       setPlayersWithPoints(players);
       setRawJson(jsonData);
-      setSaveMessage("");
-      setSaveError("");
-      setSaveSummary(null);
 
-      console.log("Match Summary:", parsedResult.matchSummary);
+      console.log("Cricsheet Match Summary:", parsedResult.matchSummary);
       console.table(
         players.map((p) => ({
           player_name: p.player_name,
@@ -246,6 +327,7 @@ export default function FantasyImport() {
         matchSummary,
         playersWithPoints,
         rawJson,
+        source: uploadSource || "cricsheet",
       });
 
       setSaveMessage("Match saved successfully.");
@@ -261,18 +343,19 @@ export default function FantasyImport() {
   function handleBack() {
     navigate("/join");
   }
+
   const verification = useMemo(() => {
     if (!matchSummary || !selectedLiveMatch) return null;
 
-    const cricsheetTeams = matchSummary?.teams || [];
-    const cricsheetDate = matchSummary?.date || "";
-    const cricsheetEventName = matchSummary?.event_name || "";
+    const uploadedTeams = matchSummary?.teams || [];
+    const uploadedDate = matchSummary?.date || "";
+    const uploadedEventName = matchSummary?.event_name || "";
 
     const liveTeams = getLiveTeams(selectedLiveMatch);
     const liveDate = selectedLiveMatch?.date || "";
     const liveMatchName = getLiveMatchName(selectedLiveMatch);
 
-    const a = cricsheetTeams.map(normalizeTeamName).sort();
+    const a = uploadedTeams.map(normalizeTeamName).sort();
     const b = liveTeams.map(normalizeTeamName).sort();
 
     const teamsMatched =
@@ -282,14 +365,14 @@ export default function FantasyImport() {
       a.every((team, index) => team === b[index]);
 
     const dateMatched =
-      onlyDate(cricsheetDate) &&
+      onlyDate(uploadedDate) &&
       onlyDate(liveDate) &&
-      onlyDate(cricsheetDate) === onlyDate(liveDate);
+      onlyDate(uploadedDate) === onlyDate(liveDate);
 
     const eventMatched =
-      cricsheetEventName && liveMatchName
-        ? normalizeText(cricsheetEventName).includes(normalizeText(liveMatchName)) ||
-          normalizeText(liveMatchName).includes(normalizeText(cricsheetEventName))
+      uploadedEventName && liveMatchName
+        ? normalizeText(uploadedEventName).includes(normalizeText(liveMatchName)) ||
+          normalizeText(liveMatchName).includes(normalizeText(uploadedEventName))
         : false;
 
     const score = [teamsMatched, dateMatched, eventMatched].filter(Boolean).length;
@@ -303,14 +386,15 @@ export default function FantasyImport() {
       teamsMatched,
       dateMatched,
       eventMatched,
-      cricsheetTeams,
+      uploadedTeams,
       liveTeams,
-      cricsheetDate: onlyDate(cricsheetDate),
+      uploadedDate: onlyDate(uploadedDate),
       liveDate: onlyDate(liveDate),
-      cricsheetEventName,
+      uploadedEventName,
       liveMatchName,
     };
   }, [matchSummary, selectedLiveMatch]);
+
   if (accessLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-100 to-gray-200 p-6">
@@ -345,7 +429,7 @@ export default function FantasyImport() {
                 Fantasy Match Import
               </h1>
               <p className="text-gray-600 mt-2">
-                Upload a Cricsheet JSON file to calculate and save fantasy points.
+                Upload either a Cricsheet JSON file or your manual/provisional fantasy JSON file.
               </p>
             </div>
 
@@ -364,7 +448,7 @@ export default function FantasyImport() {
                   Live IPL Match Helper
                 </h2>
                 <p className="text-sm text-gray-600 mt-1">
-                  Fetch latest IPL match details first, then upload Cricsheet JSON for final save.
+                  Fetch latest IPL match details first, then upload your file for final or provisional save.
                 </p>
               </div>
 
@@ -439,7 +523,7 @@ export default function FantasyImport() {
                         <ul className="list-disc ml-5">
                           {selectedLiveMatch.score.map((item, index) => (
                             <li key={index}>
-                              {item.inning || "Inning"} - {item.runs}/{item.wickets} ({item.overs})
+                              {(item.inning || "Inning")} - {item.r ?? item.runs}/{item.w ?? item.wickets} ({item.o ?? item.overs})
                             </li>
                           ))}
                         </ul>
@@ -453,7 +537,7 @@ export default function FantasyImport() {
                 </div>
 
                 <p className="text-xs text-amber-700 mt-3">
-                  This is helper data from live API. Final fantasy points still come from your uploaded Cricsheet file.
+                  This is helper data from live API for matching and verification.
                 </p>
               </div>
             )}
@@ -466,7 +550,10 @@ export default function FantasyImport() {
                   Upload Match File
                 </h2>
                 <p className="text-sm text-gray-600 mt-1">
-                  Choose a <span className="font-semibold">.json</span> file from Cricsheet.
+                  Supported formats:
+                  <span className="font-semibold"> Cricsheet JSON </span>
+                  or
+                  <span className="font-semibold"> manual/provisional fantasy JSON</span>.
                 </p>
               </div>
 
@@ -483,13 +570,16 @@ export default function FantasyImport() {
 
             <div className="mt-4 rounded-lg bg-white border border-gray-200 p-4">
               {fileName ? (
-                <p className="text-sm text-gray-700">
-                  Selected file: <span className="font-semibold">{fileName}</span>
-                </p>
+                <div className="text-sm text-gray-700 space-y-1">
+                  <p>
+                    Selected file: <span className="font-semibold">{fileName}</span>
+                  </p>
+                  <p>
+                    Detected source: <span className="font-semibold">{uploadSource || "unknown"}</span>
+                  </p>
+                </div>
               ) : (
-                <p className="text-sm text-gray-500">
-                  No file selected yet.
-                </p>
+                <p className="text-sm text-gray-500">No file selected yet.</p>
               )}
             </div>
 
@@ -500,139 +590,145 @@ export default function FantasyImport() {
         </div>
 
         {matchSummary && (
-          <div className="bg-white rounded-2xl shadow-md p-6 mb-6">
-            <h2 className="text-2xl font-semibold mb-4">Match Summary</h2>
-            {matchSummary && selectedLiveMatch && verification && (
-            <div
-              className={`bg-white rounded-2xl shadow-md p-6 mb-6 border ${
-                verification.status === "matched"
-                  ? "border-green-200 bg-green-50"
-                  : verification.status === "mismatch"
-                  ? "border-red-200 bg-red-50"
-                  : "border-yellow-200 bg-yellow-50"
-              }`}
-            >
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-                <div>
-                  <h2 className="text-2xl font-semibold">Match Verification</h2>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Compare uploaded Cricsheet match with selected live match before saving.
+          <>
+            <div className="bg-white rounded-2xl shadow-md p-6 mb-6">
+              <h2 className="text-2xl font-semibold mb-4">Match Summary</h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div className="rounded-xl bg-gray-50 p-4 border">
+                  <p>
+                    <span className="font-semibold">Source:</span> {uploadSource || "N/A"}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Match Type:</span> {matchSummary.match_type || "N/A"}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Date:</span> {matchSummary.date || "N/A"}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Venue:</span> {matchSummary.venue || "N/A"}
+                  </p>
+                  <p>
+                    <span className="font-semibold">City:</span> {matchSummary.city || "N/A"}
                   </p>
                 </div>
 
-                <span
-                  className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
-                    verification.status === "matched"
-                      ? "bg-green-100 text-green-700"
-                      : verification.status === "mismatch"
-                      ? "bg-red-100 text-red-700"
-                      : "bg-yellow-100 text-yellow-700"
-                  }`}
-                >
-                  {verification.status === "matched"
-                    ? "Verified"
+                <div className="rounded-xl bg-gray-50 p-4 border">
+                  <p>
+                    <span className="font-semibold">Teams:</span> {matchSummary.teams?.join(" vs ") || "N/A"}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Event:</span> {matchSummary.event_name || "N/A"}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Winner:</span> {matchSummary.winner || "N/A"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {selectedLiveMatch && verification && (
+              <div
+                className={`bg-white rounded-2xl shadow-md p-6 mb-6 border ${
+                  verification.status === "matched"
+                    ? "border-green-200 bg-green-50"
                     : verification.status === "mismatch"
-                    ? "Possible mismatch"
-                    : "Check before save"}
-                </span>
+                    ? "border-red-200 bg-red-50"
+                    : "border-yellow-200 bg-yellow-50"
+                }`}
+              >
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+                  <div>
+                    <h2 className="text-2xl font-semibold">Match Verification</h2>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Compare uploaded file with selected live match before saving.
+                    </p>
+                  </div>
+
+                  <span
+                    className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
+                      verification.status === "matched"
+                        ? "bg-green-100 text-green-700"
+                        : verification.status === "mismatch"
+                        ? "bg-red-100 text-red-700"
+                        : "bg-yellow-100 text-yellow-700"
+                    }`}
+                  >
+                    {verification.status === "matched"
+                      ? "Verified"
+                      : verification.status === "mismatch"
+                      ? "Possible mismatch"
+                      : "Check before save"}
+                  </span>
+                </div>
+
+                {verification.status === "matched" && (
+                  <div className="mb-4 rounded-lg bg-green-100 p-3 text-green-800">
+                    Looks good. Uploaded file and selected live match seem to match.
+                  </div>
+                )}
+
+                {verification.status === "warning" && (
+                  <div className="mb-4 rounded-lg bg-yellow-100 p-3 text-yellow-800">
+                    Partial match found. Please review once before saving.
+                  </div>
+                )}
+
+                {verification.status === "mismatch" && (
+                  <div className="mb-4 rounded-lg bg-red-100 p-3 text-red-800">
+                    Warning: selected live match may not match the uploaded file.
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                  <div className="rounded-xl bg-white p-4 border">
+                    <p className="font-semibold mb-2">Teams</p>
+                    <p>
+                      <span className="font-semibold">Uploaded:</span>{" "}
+                      {verification.uploadedTeams.join(" vs ") || "N/A"}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Live:</span>{" "}
+                      {verification.liveTeams.join(" vs ") || "N/A"}
+                    </p>
+                    <p className={`mt-2 font-medium ${verification.teamsMatched ? "text-green-700" : "text-red-700"}`}>
+                      {verification.teamsMatched ? "Teams matched" : "Teams did not match"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-white p-4 border">
+                    <p className="font-semibold mb-2">Date</p>
+                    <p>
+                      <span className="font-semibold">Uploaded:</span>{" "}
+                      {verification.uploadedDate || "N/A"}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Live:</span>{" "}
+                      {verification.liveDate || "N/A"}
+                    </p>
+                    <p className={`mt-2 font-medium ${verification.dateMatched ? "text-green-700" : "text-red-700"}`}>
+                      {verification.dateMatched ? "Date matched" : "Date did not match"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-white p-4 border">
+                    <p className="font-semibold mb-2">Event / Match Name</p>
+                    <p>
+                      <span className="font-semibold">Uploaded:</span>{" "}
+                      {verification.uploadedEventName || "N/A"}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Live:</span>{" "}
+                      {verification.liveMatchName || "N/A"}
+                    </p>
+                    <p className={`mt-2 font-medium ${verification.eventMatched ? "text-green-700" : "text-red-700"}`}>
+                      {verification.eventMatched ? "Event looks similar" : "Event looks different"}
+                    </p>
+                  </div>
+                </div>
               </div>
-
-              {verification.status === "matched" && (
-                <div className="mb-4 rounded-lg bg-green-100 p-3 text-green-800">
-                  Looks good. Uploaded Cricsheet file and selected live match seem to match.
-                </div>
-              )}
-
-              {verification.status === "warning" && (
-                <div className="mb-4 rounded-lg bg-yellow-100 p-3 text-yellow-800">
-                  Partial match found. Please review once before saving.
-                </div>
-              )}
-
-              {verification.status === "mismatch" && (
-                <div className="mb-4 rounded-lg bg-red-100 p-3 text-red-800">
-                  Warning: selected live match may not match the uploaded Cricsheet file.
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                <div className="rounded-xl bg-white p-4 border">
-                  <p className="font-semibold mb-2">Teams</p>
-                  <p>
-                    <span className="font-semibold">Cricsheet:</span>{" "}
-                    {verification.cricsheetTeams.join(" vs ") || "N/A"}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Live:</span>{" "}
-                    {verification.liveTeams.join(" vs ") || "N/A"}
-                  </p>
-                  <p className={`mt-2 font-medium ${verification.teamsMatched ? "text-green-700" : "text-red-700"}`}>
-                    {verification.teamsMatched ? "Teams matched" : "Teams did not match"}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-white p-4 border">
-                  <p className="font-semibold mb-2">Date</p>
-                  <p>
-                    <span className="font-semibold">Cricsheet:</span>{" "}
-                    {verification.cricsheetDate || "N/A"}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Live:</span>{" "}
-                    {verification.liveDate || "N/A"}
-                  </p>
-                  <p className={`mt-2 font-medium ${verification.dateMatched ? "text-green-700" : "text-red-700"}`}>
-                    {verification.dateMatched ? "Date matched" : "Date did not match"}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-white p-4 border">
-                  <p className="font-semibold mb-2">Event / Match Name</p>
-                  <p>
-                    <span className="font-semibold">Cricsheet:</span>{" "}
-                    {verification.cricsheetEventName || "N/A"}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Live:</span>{" "}
-                    {verification.liveMatchName || "N/A"}
-                  </p>
-                  <p className={`mt-2 font-medium ${verification.eventMatched ? "text-green-700" : "text-red-700"}`}>
-                    {verification.eventMatched ? "Event looks similar" : "Event looks different"}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-              <div className="rounded-xl bg-gray-50 p-4 border">
-                <p>
-                  <span className="font-semibold">Match Type:</span> {matchSummary.match_type}
-                </p>
-                <p>
-                  <span className="font-semibold">Date:</span> {matchSummary.date}
-                </p>
-                <p>
-                  <span className="font-semibold">Venue:</span> {matchSummary.venue}
-                </p>
-                <p>
-                  <span className="font-semibold">City:</span> {matchSummary.city}
-                </p>
-              </div>
-
-              <div className="rounded-xl bg-gray-50 p-4 border">
-                <p>
-                  <span className="font-semibold">Teams:</span> {matchSummary.teams?.join(" vs ")}
-                </p>
-                <p>
-                  <span className="font-semibold">Event:</span> {matchSummary.event_name}
-                </p>
-                <p>
-                  <span className="font-semibold">Winner:</span> {matchSummary.winner || "N/A"}
-                </p>
-              </div>
-            </div>
-          </div>
+            )}
+          </>
         )}
 
         {playersWithPoints.length > 0 && (
@@ -641,7 +737,7 @@ export default function FantasyImport() {
               <div>
                 <h2 className="text-2xl font-semibold">Player Fantasy Points</h2>
                 <p className="text-sm text-gray-600 mt-1">
-                  Review the calculated points before saving.
+                  Review the calculated or uploaded points before saving.
                 </p>
               </div>
 
@@ -695,7 +791,7 @@ export default function FantasyImport() {
               <table className="w-full border border-gray-200 text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="border p-2 text-left">Cricsheet Name</th>
+                    <th className="border p-2 text-left">Player Name</th>
                     <th className="border p-2 text-left">Mapped Name</th>
                     <th className="border p-2 text-left">Runs</th>
                     <th className="border p-2 text-left">Wickets</th>
@@ -707,8 +803,10 @@ export default function FantasyImport() {
                 </thead>
                 <tbody>
                   {playersWithPoints.map((player) => (
-                    <tr key={player.player_name}>
-                      <td className="border p-2">{player.cricsheet_player_name}</td>
+                    <tr key={`${player.player_name}-${player.team_name || ""}`}>
+                      <td className="border p-2">
+                        {player.cricsheet_player_name || player.player_name}
+                      </td>
                       <td className="border p-2">{player.normalized_player_name}</td>
                       <td className="border p-2">{player.runs}</td>
                       <td className="border p-2">{player.wickets}</td>
