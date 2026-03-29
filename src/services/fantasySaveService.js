@@ -6,6 +6,13 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback;
 }
 
+function normalizeMatchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-");
+}
+
 function buildMatchKey(matchSummary) {
   const date = matchSummary?.date || "unknown-date";
   const team1 = matchSummary?.teams?.[0] || "team1";
@@ -16,7 +23,12 @@ function buildMatchKey(matchSummary) {
     .replace(/\s+/g, "-");
 }
 
-export async function saveFantasyMatch({ matchSummary, playersWithPoints, rawJson }) {
+export async function saveFantasyMatch({
+  matchSummary,
+  playersWithPoints,
+  rawJson,
+  source = "cricketdata",
+}) {
   if (!matchSummary) {
     throw new Error("Match summary is missing");
   }
@@ -25,6 +37,7 @@ export async function saveFantasyMatch({ matchSummary, playersWithPoints, rawJso
     throw new Error("No player stats available to save");
   }
 
+  const cleanSource = normalizeMatchText(source);
   const matchKey = buildMatchKey(matchSummary);
 
   // 1. check duplicate match
@@ -47,9 +60,11 @@ export async function saveFantasyMatch({ matchSummary, playersWithPoints, rawJso
     .from("matches")
     .insert([
       {
-        source: "cricsheet",
+        source: cleanSource,
         match_key: matchKey,
-        match_name: matchSummary?.event_name || `${matchSummary?.teams?.[0]} vs ${matchSummary?.teams?.[1]}`,
+        match_name:
+          matchSummary?.event_name ||
+          `${matchSummary?.teams?.[0] || "Team 1"} vs ${matchSummary?.teams?.[1] || "Team 2"}`,
         team1: matchSummary?.teams?.[0] || null,
         team2: matchSummary?.teams?.[1] || null,
         venue: matchSummary?.venue || null,
@@ -81,7 +96,7 @@ export async function saveFantasyMatch({ matchSummary, playersWithPoints, rawJso
   const playerLookup = new Map();
 
   for (const dbPlayer of dbPlayers || []) {
-    const normalizedDbName = normalizePlayerName(dbPlayer.name);
+    const normalizedDbName = normalizePlayerName(dbPlayer.player_name);
 
     if (!playerLookup.has(normalizedDbName)) {
       playerLookup.set(normalizedDbName, dbPlayer);
@@ -105,7 +120,8 @@ export async function saveFantasyMatch({ matchSummary, playersWithPoints, rawJso
       balls: safeNumber(player.balls),
       fours: safeNumber(player.fours),
       sixes: safeNumber(player.sixes),
-      strike_rate: player.strike_rate != null ? safeNumber(player.strike_rate) : null,
+      strike_rate:
+        player.strike_rate != null ? safeNumber(player.strike_rate) : null,
 
       wickets: safeNumber(player.wickets),
       balls_bowled: safeNumber(player.balls_bowled),
@@ -137,6 +153,7 @@ export async function saveFantasyMatch({ matchSummary, playersWithPoints, rawJso
 
   return {
     matchId,
+    source: cleanSource,
     totalPlayers: statsRows.length,
     matchedCount: matchedPlayers.length,
     unmatchedCount: unmatchedPlayers.length,

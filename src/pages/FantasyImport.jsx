@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../supabase";
 import { parseCricsheetMatch } from "../utils/parseCricsheetMatch";
 import { addFantasyPointsToStats } from "../utils/calculateFantasyPoints";
 import { normalizePlayerName } from "../utils/normalizePlayerName";
 import { saveFantasyMatch } from "../services/fantasySaveService";
+import { getLatestIplMatches } from "../services/liveMatchService";
 
 export default function FantasyImport() {
   const navigate = useNavigate();
@@ -23,6 +24,12 @@ export default function FantasyImport() {
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
   const [saveSummary, setSaveSummary] = useState(null);
+
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState("");
+  const [liveMatches, setLiveMatches] = useState([]);
+  const [selectedLiveMatchId, setSelectedLiveMatchId] = useState("");
+  const [selectedLiveMatch, setSelectedLiveMatch] = useState(null);
 
   useEffect(() => {
     async function checkAdminAccess() {
@@ -75,6 +82,112 @@ export default function FantasyImport() {
     checkAdminAccess();
   }, [leagueId]);
 
+  async function handleFetchLatestIplMatches() {
+    try {
+      setLiveLoading(true);
+      setLiveError("");
+
+      const result = await getLatestIplMatches();
+      const matches = result.matches || [];
+
+      setLiveMatches(matches);
+
+      if (matches.length > 0) {
+        setSelectedLiveMatchId(matches[0].id);
+        setSelectedLiveMatch(matches[0]);
+      } else {
+        setSelectedLiveMatchId("");
+        setSelectedLiveMatch(null);
+        setLiveError("No IPL matches found from live source.");
+      }
+    } catch (error) {
+      console.error("Live IPL fetch error:", error);
+      setLiveError(error.message || "Failed to fetch latest IPL matches.");
+    } finally {
+      setLiveLoading(false);
+    }
+  }
+
+  function handleLiveMatchChange(e) {
+    const matchId = e.target.value;
+    setSelectedLiveMatchId(matchId);
+
+    const foundMatch = liveMatches.find((match) => match.id === matchId) || null;
+    setSelectedLiveMatch(foundMatch);
+  }
+  function normalizeText(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/ipl|indian premier league|t20|match|men|women/g, "")
+      .replace(/[^a-z0-9 ]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function normalizeTeamName(name) {
+    const value = normalizeText(name);
+
+    const map = {
+      "royal challengers bengaluru": "rcb",
+      "royal challengers bangalore": "rcb",
+      rcb: "rcb",
+
+      "mumbai indians": "mi",
+      mi: "mi",
+
+      "chennai super kings": "csk",
+      csk: "csk",
+
+      "kolkata knight riders": "kkr",
+      kkr: "kkr",
+
+      "sunrisers hyderabad": "srh",
+      srh: "srh",
+
+      "rajasthan royals": "rr",
+      rr: "rr",
+
+      "delhi capitals": "dc",
+      dc: "dc",
+
+      "lucknow super giants": "lsg",
+      lsg: "lsg",
+
+      "gujarat titans": "gt",
+      gt: "gt",
+
+      "punjab kings": "pbks",
+      "kings xi punjab": "pbks",
+      pbks: "pbks",
+    };
+
+    return map[value] || value;
+  }
+
+  function onlyDate(value) {
+    if (!value) return "";
+
+    const str = String(value);
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    if (str.includes("T")) return str.split("T")[0];
+
+    return str.slice(0, 10);
+  }
+
+  function getLiveTeams(match) {
+    if (!match) return [];
+
+    if (Array.isArray(match.teams) && match.teams.length) {
+      return match.teams;
+    }
+
+    return [match.team1, match.team2, match.t1, match.t2].filter(Boolean);
+  }
+
+  function getLiveMatchName(match) {
+    return match?.name || match?.series || match?.matchType || "";
+  }
   const handleFileUpload = async (e) => {
     try {
       const file = e.target.files[0];
@@ -148,7 +261,56 @@ export default function FantasyImport() {
   function handleBack() {
     navigate("/join");
   }
+  const verification = useMemo(() => {
+    if (!matchSummary || !selectedLiveMatch) return null;
 
+    const cricsheetTeams = matchSummary?.teams || [];
+    const cricsheetDate = matchSummary?.date || "";
+    const cricsheetEventName = matchSummary?.event_name || "";
+
+    const liveTeams = getLiveTeams(selectedLiveMatch);
+    const liveDate = selectedLiveMatch?.date || "";
+    const liveMatchName = getLiveMatchName(selectedLiveMatch);
+
+    const a = cricsheetTeams.map(normalizeTeamName).sort();
+    const b = liveTeams.map(normalizeTeamName).sort();
+
+    const teamsMatched =
+      a.length >= 2 &&
+      b.length >= 2 &&
+      a.length === b.length &&
+      a.every((team, index) => team === b[index]);
+
+    const dateMatched =
+      onlyDate(cricsheetDate) &&
+      onlyDate(liveDate) &&
+      onlyDate(cricsheetDate) === onlyDate(liveDate);
+
+    const eventMatched =
+      cricsheetEventName && liveMatchName
+        ? normalizeText(cricsheetEventName).includes(normalizeText(liveMatchName)) ||
+          normalizeText(liveMatchName).includes(normalizeText(cricsheetEventName))
+        : false;
+
+    const score = [teamsMatched, dateMatched, eventMatched].filter(Boolean).length;
+
+    let status = "warning";
+    if (score >= 2) status = "matched";
+    if (score === 0) status = "mismatch";
+
+    return {
+      status,
+      teamsMatched,
+      dateMatched,
+      eventMatched,
+      cricsheetTeams,
+      liveTeams,
+      cricsheetDate: onlyDate(cricsheetDate),
+      liveDate: onlyDate(liveDate),
+      cricsheetEventName,
+      liveMatchName,
+    };
+  }, [matchSummary, selectedLiveMatch]);
   if (accessLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-100 to-gray-200 p-6">
@@ -193,6 +355,108 @@ export default function FantasyImport() {
             >
               Back
             </button>
+          </div>
+
+          <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-6 mb-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">
+                  Live IPL Match Helper
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  Fetch latest IPL match details first, then upload Cricsheet JSON for final save.
+                </p>
+              </div>
+
+              <button
+                onClick={handleFetchLatestIplMatches}
+                disabled={liveLoading}
+                className="rounded-lg bg-indigo-600 px-5 py-3 text-white font-semibold shadow hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {liveLoading ? "Fetching..." : "Fetch Latest IPL Match"}
+              </button>
+            </div>
+
+            {liveError && (
+              <div className="mt-4 rounded-lg bg-red-100 p-3 text-red-800">
+                {liveError}
+              </div>
+            )}
+
+            {liveMatches.length > 0 && (
+              <div className="mt-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Select Match
+                </label>
+
+                <select
+                  value={selectedLiveMatchId}
+                  onChange={handleLiveMatchChange}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                >
+                  {liveMatches.map((match) => (
+                    <option key={match.id} value={match.id}>
+                      {match.name} {match.date ? `- ${match.date}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {selectedLiveMatch && (
+              <div className="mt-4 rounded-xl bg-white border border-indigo-100 p-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">
+                  Selected Live Match
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div className="rounded-xl bg-gray-50 p-4 border">
+                    <p>
+                      <span className="font-semibold">Match:</span> {selectedLiveMatch.name || "N/A"}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Teams:</span> {selectedLiveMatch.teams?.join(" vs ") || "N/A"}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Type:</span> {selectedLiveMatch.matchType || "N/A"}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Date:</span> {selectedLiveMatch.date || "N/A"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-gray-50 p-4 border">
+                    <p>
+                      <span className="font-semibold">Venue:</span> {selectedLiveMatch.venue || "N/A"}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Status:</span> {selectedLiveMatch.status || "N/A"}
+                    </p>
+
+                    {selectedLiveMatch.score?.length > 0 ? (
+                      <div className="mt-2">
+                        <p className="font-semibold mb-1">Score:</p>
+                        <ul className="list-disc ml-5">
+                          {selectedLiveMatch.score.map((item, index) => (
+                            <li key={index}>
+                              {item.inning || "Inning"} - {item.runs}/{item.wickets} ({item.overs})
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : (
+                      <p>
+                        <span className="font-semibold">Score:</span> N/A
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-xs text-amber-700 mt-3">
+                  This is helper data from live API. Final fantasy points still come from your uploaded Cricsheet file.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="rounded-2xl border-2 border-dashed border-blue-300 bg-blue-50 p-6">
