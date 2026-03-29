@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../supabase";
 import { parseCricsheetMatch } from "../utils/parseCricsheetMatch";
 import { addFantasyPointsToStats } from "../utils/calculateFantasyPoints";
@@ -7,6 +7,7 @@ import { normalizePlayerName } from "../utils/normalizePlayerName";
 import { saveFantasyMatch } from "../services/fantasySaveService";
 
 export default function FantasyImport() {
+  const navigate = useNavigate();
   const { leagueId } = useParams();
 
   const [accessLoading, setAccessLoading] = useState(true);
@@ -26,55 +27,53 @@ export default function FantasyImport() {
   useEffect(() => {
     async function checkAdminAccess() {
       try {
-        setAccessLoading(true)
-        setAccessError('')
-  
-        const storedUser = JSON.parse(localStorage.getItem('auction_user'))
-        const memberId = storedUser?.memberId
-        const storedLeagueId = storedUser?.leagueId
-        const role = storedUser?.role
-  
+        setAccessLoading(true);
+        setAccessError("");
+
+        const storedUser = JSON.parse(localStorage.getItem("auction_user"));
+        const memberId = storedUser?.memberId;
+        const storedLeagueId = storedUser?.leagueId;
+        const role = storedUser?.role;
+
         if (!memberId || !storedLeagueId) {
-          throw new Error('No league session found. Please join the league first.')
+          throw new Error("No league session found. Please join the league first.");
         }
-  
+
         if (storedLeagueId !== leagueId) {
-          throw new Error('This page does not belong to your current league session.')
+          throw new Error("This page does not belong to your current league session.");
         }
-  
-        // Use same style as lobby: role-based access from stored session
-        if (role === 'admin') {
-          setIsAdmin(true)
-          return
+
+        if (role === "admin") {
+          setIsAdmin(true);
+          return;
         }
-  
-        // Fallback DB check if role is missing or not admin
+
         const { data: memberData, error: memberError } = await supabase
-          .from('league_members')
-          .select('id, league_id, role')
-          .eq('id', memberId)
-          .eq('league_id', leagueId)
-          .single()
-  
+          .from("league_members")
+          .select("id, league_id, role")
+          .eq("id", memberId)
+          .eq("league_id", leagueId)
+          .single();
+
         if (memberError || !memberData) {
-          throw new Error('League member not found.')
+          throw new Error("League member not found.");
         }
-  
-        if (memberData.role !== 'admin') {
-          throw new Error('Only league admin can upload fantasy match data.')
+
+        if (memberData.role !== "admin") {
+          throw new Error("Only league admin can upload fantasy match data.");
         }
-  
-        setIsAdmin(true)
+
+        setIsAdmin(true);
       } catch (error) {
-        console.error('FantasyImport access error:', error)
-        setAccessError(error.message || 'Access denied.')
+        console.error("FantasyImport access error:", error);
+        setAccessError(error.message || "Access denied.");
       } finally {
-        setAccessLoading(false)
+        setAccessLoading(false);
       }
     }
-  
-    checkAdminAccess()
-  }, [leagueId])
+
+    checkAdminAccess();
+  }, [leagueId]);
 
   const handleFileUpload = async (e) => {
     try {
@@ -146,10 +145,14 @@ export default function FantasyImport() {
     }
   };
 
+  function handleBack() {
+    navigate("/join");
+  }
+
   if (accessLoading) {
     return (
-      <div className="min-h-screen bg-gray-100 p-6">
-        <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-md p-6">
+      <div className="min-h-screen bg-gradient-to-b from-gray-100 to-gray-200 p-6">
+        <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow-md p-6">
           <p className="text-lg font-semibold text-gray-700">
             Checking admin access...
           </p>
@@ -160,8 +163,8 @@ export default function FantasyImport() {
 
   if (accessError || !isAdmin) {
     return (
-      <div className="min-h-screen bg-gray-100 p-6">
-        <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-md p-6">
+      <div className="min-h-screen bg-gradient-to-b from-gray-100 to-gray-200 p-6">
+        <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow-md p-6">
           <p className="text-red-600 font-semibold">
             {accessError || "Access denied."}
           </p>
@@ -171,25 +174,65 @@ export default function FantasyImport() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
+    <div className="min-h-screen bg-gradient-to-b from-gray-100 to-gray-200 p-4 md:p-6">
       <div className="max-w-6xl mx-auto">
-        <div className="bg-white rounded-2xl shadow-md p-6 mb-6">
-          <h1 className="text-3xl font-bold mb-4">Fantasy Match Import</h1>
+        <div className="bg-white rounded-2xl shadow-md p-6 md:p-8 mb-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+            <div>
+              <h1 className="text-3xl md:text-4xl font-bold text-gray-900">
+                Fantasy Match Import
+              </h1>
+              <p className="text-gray-600 mt-2">
+                Upload a Cricsheet JSON file to calculate and save fantasy points.
+              </p>
+            </div>
 
-          <input
-            type="file"
-            accept=".json"
-            onChange={handleFileUpload}
-            className="block w-full mb-4"
-          />
+            <button
+              onClick={handleBack}
+              className="rounded-lg bg-gray-600 px-4 py-2 text-white hover:bg-gray-700"
+            >
+              Back
+            </button>
+          </div>
 
-          {fileName && (
-            <p className="text-sm text-gray-600">
-              Selected file: <span className="font-semibold">{fileName}</span>
-            </p>
-          )}
+          <div className="rounded-2xl border-2 border-dashed border-blue-300 bg-blue-50 p-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">
+                  Upload Match File
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  Choose a <span className="font-semibold">.json</span> file from Cricsheet.
+                </p>
+              </div>
 
-          {loading && <p className="text-blue-600 mt-2">Processing file...</p>}
+              <label className="inline-flex cursor-pointer items-center justify-center rounded-lg bg-blue-600 px-5 py-3 text-white font-semibold shadow hover:bg-blue-700">
+                Choose JSON File
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 rounded-lg bg-white border border-gray-200 p-4">
+              {fileName ? (
+                <p className="text-sm text-gray-700">
+                  Selected file: <span className="font-semibold">{fileName}</span>
+                </p>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  No file selected yet.
+                </p>
+              )}
+            </div>
+
+            {loading && (
+              <p className="text-blue-600 mt-4 font-medium">Processing file...</p>
+            )}
+          </div>
         </div>
 
         {matchSummary && (
@@ -197,17 +240,31 @@ export default function FantasyImport() {
             <h2 className="text-2xl font-semibold mb-4">Match Summary</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-              <div>
-                <p><span className="font-semibold">Match Type:</span> {matchSummary.match_type}</p>
-                <p><span className="font-semibold">Date:</span> {matchSummary.date}</p>
-                <p><span className="font-semibold">Venue:</span> {matchSummary.venue}</p>
-                <p><span className="font-semibold">City:</span> {matchSummary.city}</p>
+              <div className="rounded-xl bg-gray-50 p-4 border">
+                <p>
+                  <span className="font-semibold">Match Type:</span> {matchSummary.match_type}
+                </p>
+                <p>
+                  <span className="font-semibold">Date:</span> {matchSummary.date}
+                </p>
+                <p>
+                  <span className="font-semibold">Venue:</span> {matchSummary.venue}
+                </p>
+                <p>
+                  <span className="font-semibold">City:</span> {matchSummary.city}
+                </p>
               </div>
 
-              <div>
-                <p><span className="font-semibold">Teams:</span> {matchSummary.teams?.join(" vs ")}</p>
-                <p><span className="font-semibold">Event:</span> {matchSummary.event_name}</p>
-                <p><span className="font-semibold">Winner:</span> {matchSummary.winner || "N/A"}</p>
+              <div className="rounded-xl bg-gray-50 p-4 border">
+                <p>
+                  <span className="font-semibold">Teams:</span> {matchSummary.teams?.join(" vs ")}
+                </p>
+                <p>
+                  <span className="font-semibold">Event:</span> {matchSummary.event_name}
+                </p>
+                <p>
+                  <span className="font-semibold">Winner:</span> {matchSummary.winner || "N/A"}
+                </p>
               </div>
             </div>
           </div>
@@ -215,8 +272,13 @@ export default function FantasyImport() {
 
         {playersWithPoints.length > 0 && (
           <div className="bg-white rounded-2xl shadow-md p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-2xl font-semibold">Player Fantasy Points</h2>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-2xl font-semibold">Player Fantasy Points</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  Review the calculated points before saving.
+                </p>
+              </div>
 
               <button
                 onClick={handleSaveMatch}
@@ -241,9 +303,15 @@ export default function FantasyImport() {
 
             {saveSummary && (
               <div className="mb-4 rounded-lg bg-gray-100 p-4 text-sm">
-                <p><span className="font-semibold">Total Players:</span> {saveSummary.totalPlayers}</p>
-                <p><span className="font-semibold">Matched:</span> {saveSummary.matchedCount}</p>
-                <p><span className="font-semibold">Unmatched:</span> {saveSummary.unmatchedCount}</p>
+                <p>
+                  <span className="font-semibold">Total Players:</span> {saveSummary.totalPlayers}
+                </p>
+                <p>
+                  <span className="font-semibold">Matched:</span> {saveSummary.matchedCount}
+                </p>
+                <p>
+                  <span className="font-semibold">Unmatched:</span> {saveSummary.unmatchedCount}
+                </p>
 
                 {saveSummary.unmatchedPlayers?.length > 0 && (
                   <div className="mt-2">
