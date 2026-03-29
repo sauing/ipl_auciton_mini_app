@@ -9,6 +9,7 @@ export default function JoinLeague() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [joinedLeague, setJoinedLeague] = useState(null)
+  const [auctionFinished, setAuctionFinished] = useState(false)
 
   useEffect(() => {
     const storedUser = JSON.parse(localStorage.getItem('auction_user'))
@@ -20,6 +21,27 @@ export default function JoinLeague() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!joinedLeague) return
+
+    const checkAuction = async () => {
+      const { data, error } = await supabase
+        .from('auction_state')
+        .select('status')
+        .eq('league_id', joinedLeague.id)
+        .maybeSingle()
+
+      if (error) {
+        console.error('Auction state fetch error:', error)
+        return
+      }
+
+      setAuctionFinished(data?.status === 'finished')
+    }
+
+    checkAuction()
+  }, [joinedLeague])
+
   const handleJoinLeague = async () => {
     if (!userName.trim() || !joinCode.trim()) {
       setMessage('Please enter your name and join code')
@@ -30,6 +52,7 @@ export default function JoinLeague() {
       setLoading(true)
       setMessage('')
       setJoinedLeague(null)
+      setAuctionFinished(false)
 
       const cleanJoinCode = joinCode.trim().toUpperCase()
       const cleanUserName = userName.trim()
@@ -56,6 +79,18 @@ export default function JoinLeague() {
         throw existingMemberError
       }
 
+      const { data: auctionData, error: auctionError } = await supabase
+        .from('auction_state')
+        .select('status')
+        .eq('league_id', leagueData.id)
+        .maybeSingle()
+
+      if (auctionError) {
+        throw auctionError
+      }
+
+      const isLeagueClosed = auctionData?.status === 'finished'
+
       if (existingMember) {
         localStorage.setItem(
           'auction_user',
@@ -81,9 +116,15 @@ export default function JoinLeague() {
           league_name: leagueData.league_name,
           join_code: leagueData.join_code,
         })
+        setAuctionFinished(isLeagueClosed)
         setMessage(`Welcome back, ${existingMember.user_name}`)
         setUserName('')
         setJoinCode('')
+        return
+      }
+
+      if (isLeagueClosed) {
+        setMessage('League is closed. New users cannot join now.')
         return
       }
 
@@ -168,12 +209,21 @@ export default function JoinLeague() {
 
         {joinedLeague && (
           <div className="mt-4 space-y-3">
-            <Link
-              to={`/league/${joinedLeague.id}`}
-              className="block rounded bg-black px-4 py-3 text-center text-white"
-            >
-              Go to League Lobby
-            </Link>
+            {auctionFinished ? (
+              <button
+                disabled
+                className="block w-full cursor-not-allowed rounded bg-gray-400 px-4 py-3 text-center text-white"
+              >
+                League Lobby (Closed)
+              </button>
+            ) : (
+              <Link
+                to={`/league/${joinedLeague.id}`}
+                className="block rounded bg-black px-4 py-3 text-center text-white"
+              >
+                Go to League Lobby
+              </Link>
+            )}
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <button
@@ -187,15 +237,28 @@ export default function JoinLeague() {
                 onClick={() => navigate(`/leaderboard`)}
                 className="rounded bg-indigo-600 px-4 py-3 text-white"
               >
-                Leaderboard
+                Fantasy Leaderboard
               </button>
             </div>
+
+            <button
+              onClick={() => {
+                const storedUser = JSON.parse(localStorage.getItem('auction_user'))
+                if (storedUser?.memberId) {
+                  navigate(`/league/${joinedLeague.id}/team/${storedUser.memberId}`)
+                }
+              }}
+              className="w-full rounded bg-purple-600 px-4 py-3 text-white"
+            >
+              My Fantasy Team
+            </button>
 
             <button
               onClick={() => {
                 localStorage.removeItem('auction_user')
                 localStorage.removeItem('joined_league')
                 setJoinedLeague(null)
+                setAuctionFinished(false)
                 setMessage('Logged out successfully')
               }}
               className="w-full rounded bg-red-600 px-4 py-3 text-white"

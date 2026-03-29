@@ -11,7 +11,7 @@ export default function Home() {
       const user = JSON.parse(stored)
 
       // redirect to league lobby
-      navigate(`/league/${user.leagueId}`)
+      navigate(`/join`)
     }
   }, [])
 
