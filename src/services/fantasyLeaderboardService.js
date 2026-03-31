@@ -8,13 +8,9 @@ export async function getFantasyLeaderboard(leagueId) {
   // Adi's member id
   const ADI_MEMBER_ID = "c4fefe45-b975-45e8-bec9-4a6b6872ed6f";
 
-  // One-time deductions
+  // One-time deduction
   // Adi gets Devdutt now, but should not receive Devdutt's old 122 points.
   const DEVDUTT_EXISTING_POINTS_DEDUCTION = 122;
-
-  // Sridhar should not receive already-earned old points for manually assigned players.
-  const SRIDHAR_MEMBER_NAME = "Sridhar";
-  const SRIDHAR_EXISTING_POINTS_DEDUCTION = 360;
 
   // 1. fetch all owned players for this league
   const { data: teamPlayers, error: teamPlayersError } = await supabase
@@ -80,14 +76,9 @@ export async function getFantasyLeaderboard(leagueId) {
 
   // 6. member id -> user name map
   const memberNameMap = {};
-  let sridharMemberId = null;
 
   for (const member of leagueMembers || []) {
     memberNameMap[member.id] = member.user_name;
-
-    if (member.user_name === SRIDHAR_MEMBER_NAME) {
-      sridharMemberId = member.id;
-    }
   }
 
   // 7. Apply one-time fairness deduction for Adi
@@ -97,14 +88,7 @@ export async function getFantasyLeaderboard(leagueId) {
     memberPointsMap[ADI_MEMBER_ID] -= DEVDUTT_EXISTING_POINTS_DEDUCTION;
   }
 
-  // 8. Apply one-time fairness deduction for Sridhar
-  // This removes already-earned old points from Sridhar's total,
-  // while still allowing all future points to count normally.
-  if (sridharMemberId && memberPointsMap[sridharMemberId] !== undefined) {
-    memberPointsMap[sridharMemberId] -= SRIDHAR_EXISTING_POINTS_DEDUCTION;
-  }
-
-  // 9. final leaderboard
+  // 8. final leaderboard
   return Object.entries(memberPointsMap)
     .map(([member_id, total_points]) => ({
       member_id,
