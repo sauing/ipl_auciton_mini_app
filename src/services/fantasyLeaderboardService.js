@@ -5,6 +5,13 @@ export async function getFantasyLeaderboard(leagueId) {
     throw new Error("leagueId is required");
   }
 
+  // Adi's member id
+  const ADI_MEMBER_ID = "c4fefe45-b975-45e8-bec9-4a6b6872ed6f";
+
+  // One-time deduction:
+  // Adi gets Devdutt now, but should not receive Devdutt's old 122 points.
+  const DEVDUTT_EXISTING_POINTS_DEDUCTION = 122;
+
   // 1. fetch all owned players for this league
   const { data: teamPlayers, error: teamPlayersError } = await supabase
     .from("team_players")
@@ -67,14 +74,21 @@ export async function getFantasyLeaderboard(leagueId) {
     memberPointsMap[memberId] += playerTotalPoints;
   }
 
-  // 6. member id -> user name map
+  // 6. Apply one-time fairness deduction for Adi
+  // This removes Devdutt's already-earned 122 points from Adi's total,
+  // while still allowing all future Devdutt points to count normally.
+  if (memberPointsMap[ADI_MEMBER_ID] !== undefined) {
+    memberPointsMap[ADI_MEMBER_ID] -= DEVDUTT_EXISTING_POINTS_DEDUCTION;
+  }
+
+  // 7. member id -> user name map
   const memberNameMap = {};
 
   for (const member of leagueMembers || []) {
     memberNameMap[member.id] = member.user_name;
   }
 
-  // 7. final leaderboard
+  // 8. final leaderboard
   return Object.entries(memberPointsMap)
     .map(([member_id, total_points]) => ({
       member_id,
