@@ -6,6 +6,153 @@ import { addFantasyPointsToStats } from "../utils/calculateFantasyPoints";
 import { normalizePlayerName } from "../utils/normalizePlayerName";
 import { saveFantasyMatch } from "../services/fantasySaveService";
 import { getLatestIplMatches } from "../services/liveMatchService";
+import { kncbPdfSampleData } from "../utils/kncbPdfSampleData";
+import { parseKncbPdfMatch } from "../utils/parseKncbPdfMatch";
+import { extractPdfText } from "../utils/extractPdfText";
+
+function toNumber(value, fallback = 0) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function mergeMatchSummary(baseSummary, newSummary) {
+  if (!baseSummary) return newSummary || null;
+  if (!newSummary) return baseSummary || null;
+
+  const baseTeams = Array.isArray(baseSummary.teams) ? baseSummary.teams : [];
+  const newTeams = Array.isArray(newSummary.teams) ? newSummary.teams : [];
+
+  return {
+    ...baseSummary,
+    ...newSummary,
+    match_type: newSummary.match_type || baseSummary.match_type || "t20",
+    date: newSummary.date || baseSummary.date || "",
+    venue: newSummary.venue || baseSummary.venue || "",
+    city: newSummary.city || baseSummary.city || "",
+    teams: newTeams.length > 0 ? newTeams : baseTeams,
+    event_name: newSummary.event_name || baseSummary.event_name || "",
+    winner: newSummary.winner || baseSummary.winner || null,
+  };
+}
+
+function mergePlayerStats(existingStats = [], incomingStats = []) {
+  const map = new Map();
+
+  function ensurePlayer(name) {
+    const key = String(name || "").trim().toLowerCase();
+    if (!key) return null;
+
+    if (!map.has(key)) {
+      map.set(key, {
+        player_name: String(name || "").trim(),
+        runs: 0,
+        balls: 0,
+        fours: 0,
+        sixes: 0,
+        wickets: 0,
+        maidens: 0,
+        overs: 0,
+        bowling_runs: 0,
+        catches: 0,
+        stumpings: 0,
+        runouts: 0,
+        direct_runouts: 0,
+        shared_runouts: 0,
+      });
+    }
+
+    return map.get(key);
+  }
+
+  [...existingStats, ...incomingStats].forEach((player) => {
+    const item = ensurePlayer(player.player_name || player.playerName);
+    if (!item) return;
+
+    const displayName =
+      player.player_name || player.playerName || item.player_name || "";
+    if (displayName && !item.player_name) {
+      item.player_name = displayName;
+    }
+
+    item.runs += toNumber(player.runs);
+    item.balls += toNumber(player.balls);
+    item.fours += toNumber(player.fours);
+    item.sixes += toNumber(player.sixes);
+    item.wickets += toNumber(player.wickets);
+    item.maidens += toNumber(player.maidens);
+    item.overs += toNumber(player.overs);
+    item.bowling_runs += toNumber(
+      player.bowling_runs ?? player.bowlingRuns ?? player.runs_conceded
+    );
+    item.catches += toNumber(player.catches);
+    item.stumpings += toNumber(player.stumpings);
+    item.runouts += toNumber(player.runouts);
+    item.direct_runouts += toNumber(player.direct_runouts ?? player.runOutDirect);
+    item.shared_runouts += toNumber(player.shared_runouts ?? player.runOutShared);
+  });
+
+  return Array.from(map.values());
+}
+
+function convertStatsToFantasyPlayers(playerStats = []) {
+  return addFantasyPointsToStats(
+    playerStats.map((player) => ({
+      player_name: player.player_name || player.playerName || "",
+      runs: toNumber(player.runs),
+      balls: toNumber(player.balls),
+      fours: toNumber(player.fours),
+      sixes: toNumber(player.sixes),
+      wickets: toNumber(player.wickets),
+      maidens: toNumber(player.maidens),
+      overs: toNumber(player.overs),
+      bowling_runs: toNumber(player.bowling_runs ?? player.bowlingRuns),
+      catches: toNumber(player.catches),
+      stumpings: toNumber(player.stumpings),
+      runouts: toNumber(
+        player.runouts ??
+          toNumber(player.direct_runouts ?? player.runOutDirect) +
+            toNumber(player.shared_runouts ?? player.runOutShared)
+      ),
+      direct_runouts: toNumber(player.direct_runouts ?? player.runOutDirect),
+      shared_runouts: toNumber(player.shared_runouts ?? player.runOutShared),
+    }))
+  )
+    .map((player) => ({
+      ...player,
+      cricsheet_player_name: player.player_name,
+      normalized_player_name: normalizePlayerName(player.player_name),
+      runs: toNumber(player.runs),
+      wickets: toNumber(player.wickets),
+      catches: toNumber(player.catches),
+      stumpings: toNumber(player.stumpings),
+      runouts: toNumber(
+        player.runouts ??
+          toNumber(player.direct_runouts || 0) +
+            toNumber(player.shared_runouts || 0)
+      ),
+      fantasy_points: toNumber(player.fantasy_points),
+    }))
+    .filter((player) => player.player_name)
+    .sort((a, b) => b.fantasy_points - a.fantasy_points);
+}
+
+function buildCombinedEccRawJson({
+  matchSummary,
+  combinedPlayerStats,
+  pdfParts,
+  warnings,
+  lastParsedMatch,
+}) {
+  return {
+    source: "ecc-pdf-real",
+    matchSummary,
+    playerStats: combinedPlayerStats,
+    playersWithPoints: convertStatsToFantasyPlayers(combinedPlayerStats),
+    pdfParts,
+    warnings,
+    lastParsedMatch,
+  };
+}
 
 export default function FantasyImport() {
   const navigate = useNavigate();
@@ -31,6 +178,10 @@ export default function FantasyImport() {
   const [liveMatches, setLiveMatches] = useState([]);
   const [selectedLiveMatchId, setSelectedLiveMatchId] = useState("");
   const [selectedLiveMatch, setSelectedLiveMatch] = useState(null);
+
+  const [eccPdfParts, setEccPdfParts] = useState([]);
+  const [eccWarnings, setEccWarnings] = useState([]);
+  const [eccCombinedPlayerStats, setEccCombinedPlayerStats] = useState([]);
 
   useEffect(() => {
     async function checkAdminAccess() {
@@ -118,6 +269,170 @@ export default function FantasyImport() {
     setSelectedLiveMatch(foundMatch);
   }
 
+  function clearEccPdfMergeState() {
+    setEccPdfParts([]);
+    setEccWarnings([]);
+    setEccCombinedPlayerStats([]);
+  }
+
+  function handleLoadEccSampleMatch() {
+    try {
+      setLoading(true);
+      setFileName("ECC PDF Sample Match");
+      setSaveMessage("");
+      setSaveError("");
+      setSaveSummary(null);
+
+      const parsedResult = parseKncbPdfMatch(kncbPdfSampleData);
+      const sampleStats = (parsedResult.playerStats || []).map((player) => ({
+        player_name: player.player_name || player.playerName || "",
+        runs: toNumber(player.runs),
+        balls: toNumber(player.balls),
+        fours: toNumber(player.fours),
+        sixes: toNumber(player.sixes),
+        wickets: toNumber(player.wickets),
+        maidens: toNumber(player.maidens),
+        overs: toNumber(player.overs),
+        bowling_runs: toNumber(player.bowling_runs ?? player.bowlingRuns),
+        catches: toNumber(player.catches),
+        stumpings: toNumber(player.stumpings),
+        runouts: toNumber(player.runouts),
+        direct_runouts: toNumber(player.direct_runouts ?? player.runOutDirect),
+        shared_runouts: toNumber(player.shared_runouts ?? player.runOutShared),
+      }));
+
+      const players = convertStatsToFantasyPlayers(sampleStats);
+
+      clearEccPdfMergeState();
+      setUploadSource("ecc-pdf");
+      setMatchSummary(parsedResult.matchSummary);
+      setPlayersWithPoints(players);
+      setRawJson(kncbPdfSampleData);
+      setEccCombinedPlayerStats(sampleStats);
+      setEccWarnings(parsedResult.warnings || []);
+
+      console.log("ECC PDF Match Summary:", parsedResult.matchSummary);
+      console.log("ECC Parsed Match:", parsedResult);
+      console.table(players);
+    } catch (error) {
+      console.error("ECC PDF sample load error:", error);
+      alert("Failed to load ECC PDF sample match. Check console.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const handlePdfUpload = async (e) => {
+    try {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      setLoading(true);
+      setFileName(file.name);
+      setSaveMessage("");
+      setSaveError("");
+      setSaveSummary(null);
+
+      const extractedPdf = await extractPdfText(file);
+      const parsedMatch = parseKncbPdfMatch(extractedPdf);
+      console.log("=== ECC PDF DEBUG START ===");
+    console.log("File name:", file.name);
+    console.log("Extracted full text:", extractedPdf.fullText);
+    console.log("Extracted pages:", extractedPdf.pages);
+    console.log("Parsed match:", parsedMatch);
+    console.log("Parsed innings:", parsedMatch.innings);
+    console.log("Parsed playerStats:", parsedMatch.playerStats);
+    console.log("Warnings:", parsedMatch.warnings);
+    console.log("=== ECC PDF DEBUG END ===");
+
+      const incomingStats = (parsedMatch.playerStats || []).map((player) => ({
+        player_name: player.player_name || player.playerName || "",
+        runs: toNumber(player.runs),
+        balls: toNumber(player.balls),
+        fours: toNumber(player.fours),
+        sixes: toNumber(player.sixes),
+        wickets: toNumber(player.wickets),
+        maidens: toNumber(player.maidens),
+        overs: toNumber(player.overs),
+        bowling_runs: toNumber(player.bowling_runs ?? player.bowlingRuns),
+        catches: toNumber(player.catches),
+        stumpings: toNumber(player.stumpings),
+        runouts: toNumber(player.runouts),
+        direct_runouts: toNumber(player.direct_runouts ?? player.runOutDirect),
+        shared_runouts: toNumber(player.shared_runouts ?? player.runOutShared),
+      }));
+
+      const newParts = [
+        ...eccPdfParts,
+        {
+          fileName: file.name,
+          matchSummary: parsedMatch.matchSummary,
+          innings: parsedMatch.innings || [],
+          playerStats: incomingStats,
+          warnings: parsedMatch.warnings || [],
+        },
+      ];
+
+      const combinedSummary = mergeMatchSummary(matchSummary, parsedMatch.matchSummary);
+      const combinedStats = mergePlayerStats(eccCombinedPlayerStats, incomingStats);
+      const players = convertStatsToFantasyPlayers(combinedStats);
+      const warnings = [...eccWarnings, ...(parsedMatch.warnings || [])];
+
+      setUploadSource("ecc-pdf-real");
+      setMatchSummary(combinedSummary);
+      setPlayersWithPoints(players);
+      setEccPdfParts(newParts);
+      setEccWarnings(warnings);
+      setEccCombinedPlayerStats(combinedStats);
+      setRawJson(
+        buildCombinedEccRawJson({
+          matchSummary: combinedSummary,
+          combinedPlayerStats: combinedStats,
+          pdfParts: newParts,
+          warnings,
+          lastParsedMatch: parsedMatch,
+        })
+      );
+
+      console.log("PDF Extracted:", extractedPdf);
+      console.log("Parsed ECC match:", parsedMatch);
+      console.log("Parsed innings:", parsedMatch.innings);
+      console.log("Parsed playerStats:", parsedMatch.playerStats);
+      console.log("Combined ECC playerStats:", combinedStats);
+      console.log("Warnings:", warnings);
+
+      if ((parsedMatch.playerStats || []).length === 0) {
+        alert(
+          "PDF uploaded, but no player stats were parsed yet. Check console logs and warnings."
+        );
+      } else {
+        alert(
+          `PDF uploaded successfully. Current merged ECC PDFs: ${newParts.length}. Review points, then save once.`
+        );
+      }
+
+      e.target.value = "";
+    } catch (error) {
+      console.error("PDF upload error:", error);
+      alert("Failed to process PDF.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  function resetEccPdfSession() {
+    clearEccPdfMergeState();
+    setFileName("");
+    setUploadSource("");
+    setMatchSummary(null);
+    setPlayersWithPoints([]);
+    setRawJson(null);
+    setSaveMessage("");
+    setSaveError("");
+    setSaveSummary(null);
+    alert("ECC PDF session cleared. You can start fresh now.");
+  }
+
   function normalizeText(value) {
     return String(value || "")
       .toLowerCase()
@@ -201,11 +516,6 @@ export default function FantasyImport() {
     );
   }
 
-  function toNumber(value, fallback = 0) {
-    const num = Number(value);
-    return Number.isFinite(num) ? num : fallback;
-  }
-
   function parseManualFantasyJson(jsonData) {
     const summary = {
       match_type: jsonData?.matchSummary?.match_type || "t20",
@@ -263,6 +573,7 @@ export default function FantasyImport() {
       if (isManualFantasyJson(jsonData)) {
         const parsedManual = parseManualFantasyJson(jsonData);
 
+        clearEccPdfMergeState();
         setUploadSource(parsedManual.source);
         setMatchSummary(parsedManual.matchSummary);
         setPlayersWithPoints(parsedManual.playersWithPoints);
@@ -292,6 +603,7 @@ export default function FantasyImport() {
         }))
         .sort((a, b) => b.fantasy_points - a.fantasy_points);
 
+      clearEccPdfMergeState();
       setUploadSource("cricsheet");
       setMatchSummary(parsedResult.matchSummary);
       setPlayersWithPoints(players);
@@ -429,7 +741,7 @@ export default function FantasyImport() {
                 Fantasy Match Import
               </h1>
               <p className="text-gray-600 mt-2">
-                Upload either a Cricsheet JSON file or your manual/provisional fantasy JSON file.
+                Upload either a Cricsheet JSON file, your manual/provisional fantasy JSON file, an ECC PDF, or load an ECC sample match.
               </p>
             </div>
 
@@ -553,19 +865,51 @@ export default function FantasyImport() {
                   Supported formats:
                   <span className="font-semibold"> Cricsheet JSON </span>
                   or
-                  <span className="font-semibold"> manual/provisional fantasy JSON</span>.
+                  <span className="font-semibold"> manual/provisional fantasy JSON</span>
+                  or
+                  <span className="font-semibold"> ECC PDF</span>
+                  or
+                  <span className="font-semibold"> ECC sample match</span>.
                 </p>
               </div>
 
-              <label className="inline-flex cursor-pointer items-center justify-center rounded-lg bg-blue-600 px-5 py-3 text-white font-semibold shadow hover:bg-blue-700">
-                Choose JSON File
-                <input
-                  type="file"
-                  accept=".json"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-              </label>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <label className="inline-flex cursor-pointer items-center justify-center rounded-lg bg-blue-600 px-5 py-3 text-white font-semibold shadow hover:bg-blue-700">
+                  Choose JSON File
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+
+                <label className="inline-flex cursor-pointer items-center justify-center rounded-lg bg-orange-600 px-5 py-3 text-white font-semibold shadow hover:bg-orange-700">
+                  Upload ECC PDF
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    onChange={handlePdfUpload}
+                    className="hidden"
+                  />
+                </label>
+
+                <button
+                  onClick={handleLoadEccSampleMatch}
+                  disabled={loading}
+                  className="rounded-lg bg-purple-600 px-5 py-3 text-white font-semibold shadow hover:bg-purple-700 disabled:opacity-50"
+                >
+                  Load ECC Sample
+                </button>
+
+                <button
+                  onClick={resetEccPdfSession}
+                  disabled={loading || saving}
+                  className="rounded-lg bg-gray-500 px-5 py-3 text-white font-semibold shadow hover:bg-gray-600 disabled:opacity-50"
+                >
+                  Reset ECC PDFs
+                </button>
+              </div>
             </div>
 
             <div className="mt-4 rounded-lg bg-white border border-gray-200 p-4">
@@ -577,6 +921,12 @@ export default function FantasyImport() {
                   <p>
                     Detected source: <span className="font-semibold">{uploadSource || "unknown"}</span>
                   </p>
+                  {uploadSource === "ecc-pdf-real" && (
+                    <p>
+                      ECC merged PDF count:{" "}
+                      <span className="font-semibold">{eccPdfParts.length}</span>
+                    </p>
+                  )}
                 </div>
               ) : (
                 <p className="text-sm text-gray-500">No file selected yet.</p>
@@ -585,6 +935,35 @@ export default function FantasyImport() {
 
             {loading && (
               <p className="text-blue-600 mt-4 font-medium">Processing file...</p>
+            )}
+
+            {uploadSource === "ecc-pdf-real" && eccWarnings.length > 0 && (
+              <div className="mt-4 rounded-lg bg-yellow-100 border border-yellow-300 p-4">
+                <p className="font-semibold text-yellow-800 mb-2">ECC PDF warnings</p>
+                <ul className="list-disc ml-5 text-sm text-yellow-900">
+                  {eccWarnings.map((warning, index) => (
+                    <li key={`${warning}-${index}`}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {uploadSource === "ecc-pdf-real" && eccPdfParts.length > 0 && (
+              <div className="mt-4 rounded-lg bg-indigo-50 border border-indigo-200 p-4">
+                <p className="font-semibold text-indigo-900 mb-2">
+                  Uploaded ECC PDF parts
+                </p>
+                <ul className="list-disc ml-5 text-sm text-indigo-900">
+                  {eccPdfParts.map((part, index) => (
+                    <li key={`${part.fileName}-${index}`}>
+                      {part.fileName} — parsed players: {part.playerStats?.length || 0}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs text-indigo-700 mt-2">
+                  Recommended flow: upload all ECC PDFs first, then click Save Match once.
+                </p>
+              </div>
             )}
           </div>
         </div>

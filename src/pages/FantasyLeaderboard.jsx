@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getFantasyLeaderboard } from "../services/fantasyLeaderboardService";
 
@@ -10,24 +10,36 @@ export default function FantasyLeaderboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  let joinedLeagueId = null;
-  let auctionUserLeagueId = null;
+  const leagueId = useMemo(() => {
+    let joinedLeagueId = null;
+    let auctionUserLeagueId = null;
 
-  try {
-    const savedLeague = JSON.parse(localStorage.getItem("joined_league"));
-    joinedLeagueId = savedLeague?.league_id || savedLeague?.leagueId || null;
-  } catch (err) {
-    console.error("Failed to parse joined_league from localStorage:", err);
-  }
+    try {
+      const savedLeague = JSON.parse(
+        localStorage.getItem("joined_league") || "null"
+      );
 
-  try {
-    const savedUser = JSON.parse(localStorage.getItem("auction_user"));
-    auctionUserLeagueId = savedUser?.leagueId || null;
-  } catch (err) {
-    console.error("Failed to parse auction_user from localStorage:", err);
-  }
+      joinedLeagueId =
+        savedLeague?.id ||
+        savedLeague?.league_id ||
+        savedLeague?.leagueId ||
+        null;
+    } catch (err) {
+      console.error("Failed to parse joined_league from localStorage:", err);
+    }
 
-  const leagueId = routeLeagueId || joinedLeagueId || auctionUserLeagueId;
+    try {
+      const savedUser = JSON.parse(
+        localStorage.getItem("auction_user") || "null"
+      );
+
+      auctionUserLeagueId = savedUser?.leagueId || null;
+    } catch (err) {
+      console.error("Failed to parse auction_user from localStorage:", err);
+    }
+
+    return routeLeagueId || joinedLeagueId || auctionUserLeagueId;
+  }, [routeLeagueId]);
 
   useEffect(() => {
     async function loadLeaderboard() {
@@ -38,6 +50,7 @@ export default function FantasyLeaderboard() {
 
         setLoading(true);
         setError("");
+
         const data = await getFantasyLeaderboard(leagueId);
         setLeaderboard(data || []);
       } catch (err) {
@@ -52,7 +65,9 @@ export default function FantasyLeaderboard() {
   }, [leagueId]);
 
   function handleViewTeam(memberId) {
-    navigate(`/league/${leagueId}/team/${memberId}`);
+    navigate(`/league/${leagueId}/team/${memberId}`, {
+      state: { from: "fantasy-leaderboard" },
+    });
   }
 
   function handleBack() {
@@ -142,6 +157,7 @@ export default function FantasyLeaderboard() {
                       </th>
                     </tr>
                   </thead>
+
                   <tbody>
                     {leaderboard.map((row, index) => (
                       <tr

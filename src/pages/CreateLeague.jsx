@@ -116,7 +116,7 @@ export default function CreateLeague() {
             to={`/league/${createdLeague.id}`}
             className="mt-4 block rounded bg-black px-4 py-3 text-center text-white"
           >
-            Go to League Lobby
+            Go to Auction Lobby
           </Link>
         )}
       </div>

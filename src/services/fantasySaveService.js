@@ -24,10 +24,11 @@ function buildMatchKey(matchSummary) {
 }
 
 export async function saveFantasyMatch({
+  leagueId,
   matchSummary,
   playersWithPoints,
   rawJson,
-  source = "cricketdata",
+  source = "manual",
 }) {
   if (!matchSummary) {
     throw new Error("Match summary is missing");
@@ -40,7 +41,10 @@ export async function saveFantasyMatch({
   const cleanSource = normalizeMatchText(source);
   const matchKey = buildMatchKey(matchSummary);
 
-  // 1. check duplicate match
+  let matchId = null;
+  let isExistingMatch = false;
+
+  // STEP 1 → check existing match
   const { data: existingMatch, error: existingMatchError } = await supabase
     .from("matches")
     .select("id, match_key")
@@ -48,62 +52,101 @@ export async function saveFantasyMatch({
     .maybeSingle();
 
   if (existingMatchError) {
-    throw new Error(`Failed to check existing match: ${existingMatchError.message}`);
+    throw new Error(
+      `Failed to check existing match: ${existingMatchError.message}`
+    );
   }
 
+  // STEP 2 → create OR reuse existing match
   if (existingMatch) {
-    throw new Error("This match is already saved");
-  }
+    matchId = existingMatch.id;
+    isExistingMatch = true;
 
-  // 2. insert match
-  const { data: insertedMatch, error: matchInsertError } = await supabase
-    .from("matches")
-    .insert([
-      {
+    // IMPORTANT:
+    // remove previous rows so final upload replaces points
+    const { error: deleteOldStatsError } = await supabase
+      .from("player_match_stats")
+      .delete()
+      .eq("match_id", matchId);
+
+    if (deleteOldStatsError) {
+      throw new Error(
+        `Failed to replace existing stats: ${deleteOldStatsError.message}`
+      );
+    }
+
+    // optional update latest raw json
+    const { error: updateMatchError } = await supabase
+      .from("matches")
+      .update({
         source: cleanSource,
-        match_key: matchKey,
-        match_name:
-          matchSummary?.event_name ||
-          `${matchSummary?.teams?.[0] || "Team 1"} vs ${matchSummary?.teams?.[1] || "Team 2"}`,
-        team1: matchSummary?.teams?.[0] || null,
-        team2: matchSummary?.teams?.[1] || null,
-        venue: matchSummary?.venue || null,
-        city: matchSummary?.city || null,
-        match_date: matchSummary?.date || null,
-        winner: matchSummary?.winner || null,
         raw_json: rawJson || null,
-      },
-    ])
-    .select()
-    .single();
+      })
+      .eq("id", matchId);
 
-  if (matchInsertError) {
-    throw new Error(`Failed to insert match: ${matchInsertError.message}`);
+    if (updateMatchError) {
+      throw new Error(
+        `Failed to update existing match: ${updateMatchError.message}`
+      );
+    }
+  } else {
+    const { data: insertedMatch, error: matchInsertError } = await supabase
+      .from("matches")
+      .insert([
+        {
+          source: cleanSource,
+          match_key: matchKey,
+          match_name:
+            matchSummary?.event_name ||
+            `${matchSummary?.teams?.[0] || "Team 1"} vs ${
+              matchSummary?.teams?.[1] || "Team 2"
+            }`,
+          team1: matchSummary?.teams?.[0] || null,
+          team2: matchSummary?.teams?.[1] || null,
+          venue: matchSummary?.venue || null,
+          city: matchSummary?.city || null,
+          match_date: matchSummary?.date || null,
+          winner: matchSummary?.winner || null,
+          raw_json: rawJson || null,
+        },
+      ])
+      .select()
+      .single();
+
+    if (matchInsertError) {
+      throw new Error(
+        `Failed to insert match: ${matchInsertError.message}`
+      );
+    }
+
+    matchId = insertedMatch.id;
   }
 
-  const matchId = insertedMatch.id;
-
-  // 3. fetch players from DB
+  // STEP 3 → fetch players
   const { data: dbPlayers, error: dbPlayersError } = await supabase
     .from("players")
     .select("id, player_name");
 
   if (dbPlayersError) {
-    throw new Error(`Failed to fetch DB players: ${dbPlayersError.message}`);
+    throw new Error(
+      `Failed to fetch DB players: ${dbPlayersError.message}`
+    );
   }
 
-  // 4. build lookup map from DB players
+  // STEP 4 → lookup map
   const playerLookup = new Map();
 
   for (const dbPlayer of dbPlayers || []) {
-    const normalizedDbName = normalizePlayerName(dbPlayer.player_name);
+    const normalizedDbName = normalizePlayerName(
+      dbPlayer.player_name
+    );
 
     if (!playerLookup.has(normalizedDbName)) {
       playerLookup.set(normalizedDbName, dbPlayer);
     }
   }
 
-  // 5. prepare rows for player_match_stats
+  // STEP 5 → build stats rows
   const statsRows = playersWithPoints.map((player) => {
     const originalName = player.player_name || "";
     const normalizedName = normalizePlayerName(originalName);
@@ -121,42 +164,58 @@ export async function saveFantasyMatch({
       fours: safeNumber(player.fours),
       sixes: safeNumber(player.sixes),
       strike_rate:
-        player.strike_rate != null ? safeNumber(player.strike_rate) : null,
+        player.strike_rate != null
+          ? safeNumber(player.strike_rate)
+          : null,
 
       wickets: safeNumber(player.wickets),
       balls_bowled: safeNumber(player.balls_bowled),
       runs_conceded: safeNumber(player.runs_conceded),
       maidens: safeNumber(player.maidens),
-      economy: player.economy != null ? safeNumber(player.economy) : null,
+      economy:
+        player.economy != null
+          ? safeNumber(player.economy)
+          : null,
 
       catches: safeNumber(player.catches),
       stumpings: safeNumber(player.stumpings),
-      run_outs: safeNumber(player.run_outs ?? player.runouts),
+      run_outs: safeNumber(
+        player.run_outs ?? player.runouts
+      ),
       fantasy_points: safeNumber(player.fantasy_points),
 
       is_matched: !!matchedPlayer,
     };
   });
 
-  // 6. insert stats
+  // STEP 6 → insert fresh stats
   const { error: statsInsertError } = await supabase
     .from("player_match_stats")
     .insert(statsRows);
 
   if (statsInsertError) {
-    await supabase.from("matches").delete().eq("id", matchId);
-    throw new Error(`Failed to insert player match stats: ${statsInsertError.message}`);
+    throw new Error(
+      `Failed to insert player match stats: ${statsInsertError.message}`
+    );
   }
 
-  const matchedPlayers = statsRows.filter((row) => row.is_matched);
-  const unmatchedPlayers = statsRows.filter((row) => !row.is_matched);
+  const matchedPlayers = statsRows.filter(
+    (row) => row.is_matched
+  );
+
+  const unmatchedPlayers = statsRows.filter(
+    (row) => !row.is_matched
+  );
 
   return {
     matchId,
     source: cleanSource,
+    replacedExisting: isExistingMatch,
     totalPlayers: statsRows.length,
     matchedCount: matchedPlayers.length,
     unmatchedCount: unmatchedPlayers.length,
-    unmatchedPlayers: unmatchedPlayers.map((row) => row.player_name),
+    unmatchedPlayers: unmatchedPlayers.map(
+      (row) => row.player_name
+    ),
   };
 }

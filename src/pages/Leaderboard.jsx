@@ -1,18 +1,40 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../supabase'
 
 export default function Leaderboard() {
-  const { leagueId } = useParams()
+  const { leagueId: routeLeagueId } = useParams()
 
   const [members, setMembers] = useState([])
   const [teamPlayers, setTeamPlayers] = useState([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
 
+  const resolvedLeagueId = useMemo(() => {
+    if (routeLeagueId) return routeLeagueId
+
+    try {
+      const storedUser = JSON.parse(localStorage.getItem('auction_user') || 'null')
+      if (storedUser?.leagueId) return storedUser.leagueId
+
+      const joinedLeague = JSON.parse(localStorage.getItem('joined_league') || 'null')
+      if (joinedLeague?.id) return joinedLeague.id
+    } catch (error) {
+      console.error('Failed to read league id from localStorage:', error)
+    }
+
+    return null
+  }, [routeLeagueId])
+
   useEffect(() => {
+    if (!resolvedLeagueId) {
+      setLoading(false)
+      setMessage('League not found. Please join the league again.')
+      return
+    }
+
     fetchLeaderboardData()
-  }, [])
+  }, [resolvedLeagueId])
 
   const fetchLeaderboardData = async () => {
     try {
@@ -22,14 +44,14 @@ export default function Leaderboard() {
       const { data: membersData, error: membersError } = await supabase
         .from('league_members')
         .select('*')
-        .eq('league_id', leagueId)
+        .eq('league_id', resolvedLeagueId)
 
       if (membersError) throw membersError
 
       const { data: teamData, error: teamError } = await supabase
         .from('team_players')
         .select('*')
-        .eq('league_id', leagueId)
+        .eq('league_id', resolvedLeagueId)
 
       if (teamError) throw teamError
 
@@ -49,7 +71,7 @@ export default function Leaderboard() {
       )
 
       const totalSpent = memberPlayers.reduce(
-        (sum, player) => sum + player.purchase_price,
+        (sum, player) => sum + (player.purchase_price || 0),
         0
       )
 
@@ -66,6 +88,8 @@ export default function Leaderboard() {
       return a.budget_remaining - b.budget_remaining
     })
 
+  const backToLobbyLink = resolvedLeagueId ? `/league/${resolvedLeagueId}` : '/join'
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-xl">
@@ -76,7 +100,7 @@ export default function Leaderboard() {
 
   return (
     <div className="min-h-screen bg-slate-100 p-6">
-      <div className="mx-auto max-w-5xl rounded-xl bg-white p-6 shadow-lg">
+      <div className="mx-auto max-w-6xl rounded-xl bg-white p-6 shadow-lg">
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-black">Leaderboard</h1>
@@ -84,7 +108,7 @@ export default function Leaderboard() {
           </div>
 
           <Link
-            to={`/league/${leagueId}`}
+            to={backToLobbyLink}
             className="rounded bg-blue-600 px-4 py-2 text-white"
           >
             Back to Lobby
@@ -107,12 +131,13 @@ export default function Leaderboard() {
                   <th className="border px-4 py-2 text-left text-black">Players Bought</th>
                   <th className="border px-4 py-2 text-left text-black">Total Spent</th>
                   <th className="border px-4 py-2 text-left text-black">Remaining Budget</th>
+                  <th className="border px-4 py-2 text-left text-black">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {leaderboardData.map((member, index) => (
                   <tr key={member.id}>
-                    <td className="border px-4 py-2 text-black font-semibold">
+                    <td className="border px-4 py-2 font-semibold text-black">
                       #{index + 1}
                     </td>
                     <td className="border px-4 py-2 text-black">
@@ -126,6 +151,14 @@ export default function Leaderboard() {
                     </td>
                     <td className="border px-4 py-2 text-black">
                       {member.budget_remaining}
+                    </td>
+                    <td className="border px-4 py-2 text-black">
+                      <Link
+                        to={`/league/${resolvedLeagueId}/team/${member.id}`}
+                        className="inline-block rounded bg-emerald-600 px-3 py-1 text-sm text-white"
+                      >
+                        View Team
+                      </Link>
                     </td>
                   </tr>
                 ))}
