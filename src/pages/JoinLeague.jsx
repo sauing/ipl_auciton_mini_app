@@ -12,17 +12,21 @@ export default function JoinLeague() {
   const [auctionFinished, setAuctionFinished] = useState(false)
 
   useEffect(() => {
-    const storedUser = JSON.parse(localStorage.getItem('auction_user'))
-    const storedLeague = JSON.parse(localStorage.getItem('joined_league'))
+    try {
+      const storedUser = JSON.parse(localStorage.getItem('auction_user') || 'null')
+      const storedLeague = JSON.parse(localStorage.getItem('joined_league') || 'null')
 
-    if (storedUser && storedLeague && storedUser.leagueId === storedLeague.id) {
-      setJoinedLeague(storedLeague)
-      setMessage(`Welcome back to ${storedLeague.league_name}`)
+      if (storedUser && storedLeague && storedUser.leagueId === storedLeague.id) {
+        setJoinedLeague(storedLeague)
+        setMessage(`Welcome back to ${storedLeague.league_name}`)
+      }
+    } catch (error) {
+      console.error('Failed to restore joined league session:', error)
     }
   }, [])
 
   useEffect(() => {
-    if (!joinedLeague) return
+    if (!joinedLeague?.id) return
 
     const checkAuction = async () => {
       const { data, error } = await supabase
@@ -40,6 +44,26 @@ export default function JoinLeague() {
     }
 
     checkAuction()
+
+    const channel = supabase
+      .channel(`join-league-${joinedLeague.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'auction_state',
+          filter: `league_id=eq.${joinedLeague.id}`,
+        },
+        () => {
+          checkAuction()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [joinedLeague])
 
   const handleJoinLeague = async () => {
@@ -221,7 +245,7 @@ export default function JoinLeague() {
                 to={`/league/${joinedLeague.id}`}
                 className="block rounded bg-black px-4 py-3 text-center text-white"
               >
-                Go to League Lobby
+                Go to Auction Lobby
               </Link>
             )}
 
@@ -234,7 +258,7 @@ export default function JoinLeague() {
               </button>
 
               <button
-                onClick={() => navigate(`/leaderboard`)}
+                onClick={() => navigate(`/league/${joinedLeague.id}/fantasy-leaderboard`)}
                 className="rounded bg-indigo-600 px-4 py-3 text-white"
               >
                 Fantasy Leaderboard
@@ -243,9 +267,13 @@ export default function JoinLeague() {
 
             <button
               onClick={() => {
-                const storedUser = JSON.parse(localStorage.getItem('auction_user'))
-                if (storedUser?.memberId) {
-                  navigate(`/league/${joinedLeague.id}/team/${storedUser.memberId}`)
+                try {
+                  const storedUser = JSON.parse(localStorage.getItem('auction_user') || 'null')
+                  if (storedUser?.memberId) {
+                    navigate(`/league/${joinedLeague.id}/team/${storedUser.memberId}`)
+                  }
+                } catch (error) {
+                  console.error('Failed to read auction user:', error)
                 }
               }}
               className="w-full rounded bg-purple-600 px-4 py-3 text-white"

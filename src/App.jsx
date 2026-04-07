@@ -9,7 +9,7 @@ import TeamPage from './pages/TeamPage'
 import Leaderboard from './pages/Leaderboard'
 import WinnerPage from './pages/WinnerPage'
 import FantasyImport from './pages/FantasyImport'
-import FantasyLeaderboard from "./pages/FantasyLeaderboard";
+import FantasyLeaderboard from './pages/FantasyLeaderboard'
 
 function App() {
   return (
@@ -17,14 +17,18 @@ function App() {
       <Route path="/" element={<Home />} />
       <Route path="/create" element={<CreateLeague />} />
       <Route path="/join" element={<JoinLeague />} />
+
       <Route path="/league/:leagueId" element={<LeagueLobby />} />
-      <Route path="/auction-setup" element={<AuctionSetup />} />
+      <Route path="/auction-setup/:leagueId" element={<AuctionSetup />} />
       <Route path="/auction/:leagueId" element={<AuctionRoom />} />
       <Route path="/league/:leagueId/team/:memberId" element={<TeamPage />} />
       <Route path="/league/:leagueId/leaderboard" element={<Leaderboard />} />
       <Route path="/winner/:leagueId" element={<WinnerPage />} />
       <Route path="/fantasy-import/:leagueId" element={<FantasyImport />} />
-      <Route path="/leaderboard" element={<FantasyLeaderboard />} />
+      <Route
+        path="/league/:leagueId/fantasy-leaderboard"
+        element={<FantasyLeaderboard />}
+      />
     </Routes>
   )
 }

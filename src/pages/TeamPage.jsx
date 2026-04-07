@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../supabase";
 
 export default function TeamPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { leagueId: routeLeagueId, memberId: routeMemberId } = useParams();
 
   const [member, setMember] = useState(null);
@@ -11,32 +12,53 @@ export default function TeamPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
 
-  let joinedLeagueId = null;
-  let auctionUserLeagueId = null;
-  let auctionUserMemberId = null;
+  const storageData = useMemo(() => {
+    let joinedLeagueId = null;
+    let auctionUserLeagueId = null;
+    let auctionUserMemberId = null;
 
-  try {
-    const savedLeague = JSON.parse(localStorage.getItem("joined_league"));
-    joinedLeagueId = savedLeague?.league_id || savedLeague?.leagueId || null;
-  } catch (err) {
-    console.error("Failed to parse joined_league from localStorage:", err);
-  }
+    try {
+      const savedLeague = JSON.parse(localStorage.getItem("joined_league") || "null");
+      joinedLeagueId =
+        savedLeague?.id || savedLeague?.league_id || savedLeague?.leagueId || null;
+    } catch (err) {
+      console.error("Failed to parse joined_league from localStorage:", err);
+    }
 
-  try {
-    const savedUser = JSON.parse(localStorage.getItem("auction_user"));
-    auctionUserLeagueId = savedUser?.leagueId || null;
-    auctionUserMemberId = savedUser?.memberId || null;
-  } catch (err) {
-    console.error("Failed to parse auction_user from localStorage:", err);
-  }
+    try {
+      const savedUser = JSON.parse(localStorage.getItem("auction_user") || "null");
+      auctionUserLeagueId = savedUser?.leagueId || null;
+      auctionUserMemberId = savedUser?.memberId || null;
+    } catch (err) {
+      console.error("Failed to parse auction_user from localStorage:", err);
+    }
 
-  const leagueId = routeLeagueId || joinedLeagueId || auctionUserLeagueId;
-  const memberId = routeMemberId || auctionUserMemberId;
+    return {
+      joinedLeagueId,
+      auctionUserLeagueId,
+      auctionUserMemberId,
+    };
+  }, []);
+
+  const leagueId =
+    routeLeagueId || storageData.joinedLeagueId || storageData.auctionUserLeagueId;
+
+  const memberId = routeMemberId || storageData.auctionUserMemberId;
 
   const isOwnTeam =
-    auctionUserMemberId && memberId && auctionUserMemberId === memberId;
+    storageData.auctionUserMemberId &&
+    memberId &&
+    storageData.auctionUserMemberId === memberId;
+
+  const cameFrom = location.state?.from || null;
 
   useEffect(() => {
+    if (!leagueId || !memberId) {
+      setLoading(false);
+      setMessage("League or member not found. Please join the league again.");
+      return;
+    }
+
     fetchTeamData();
   }, [leagueId, memberId]);
 
@@ -45,17 +67,10 @@ export default function TeamPage() {
       setLoading(true);
       setMessage("");
 
-      if (!leagueId) {
-        throw new Error("League not found. Please join the league again.");
-      }
-
-      if (!memberId) {
-        throw new Error("Member not found.");
-      }
-
       const { data: memberData, error: memberError } = await supabase
         .from("league_members")
         .select("*")
+        .eq("league_id", leagueId)
         .eq("id", memberId)
         .single();
 
@@ -86,7 +101,7 @@ export default function TeamPage() {
       if (playerIds.length > 0) {
         const { data: statsData, error: statsError } = await supabase
           .from("player_match_stats")
-          .select("*")
+          .select("player_id, fantasy_points")
           .in("player_id", playerIds);
 
         if (statsError) throw statsError;
@@ -131,14 +146,34 @@ export default function TeamPage() {
   const remainingBudget =
     member?.budget_remaining ?? Math.max(0, 100 - totalSpent);
 
-    function handleBack() {
-      if (!isOwnTeam) {
-        navigate("/leaderboard");
-        return;
-      }
-  
+  function handleBack() {
+    if (!leagueId) {
       navigate("/join");
+      return;
     }
+
+    if (cameFrom === "fantasy-leaderboard") {
+      navigate(`/league/${leagueId}/fantasy-leaderboard`);
+      return;
+    }
+
+    if (cameFrom === "auction-leaderboard") {
+      navigate(`/league/${leagueId}/leaderboard`);
+      return;
+    }
+
+    if (cameFrom === "dashboard") {
+      navigate("/join");
+      return;
+    }
+
+    if (!isOwnTeam) {
+      navigate(`/league/${leagueId}/leaderboard`);
+      return;
+    }
+
+    navigate("/join");
+  }
 
   if (loading) {
     return (
@@ -235,13 +270,13 @@ export default function TeamPage() {
                 {teamPlayers.map((item) => (
                   <tr key={item.id} className="hover:bg-gray-50 transition">
                     <td className="border-b px-4 py-3 font-medium text-gray-900">
-                      {item.players?.player_name}
+                      {item.players?.player_name || "-"}
                     </td>
                     <td className="border-b px-4 py-3 text-gray-700">
-                      {item.players?.ipl_team}
+                      {item.players?.ipl_team || "-"}
                     </td>
                     <td className="border-b px-4 py-3 text-gray-700">
-                      {item.players?.role_type}
+                      {item.players?.role_type || "-"}
                     </td>
                     <td className="border-b px-4 py-3 text-gray-700">
                       {item.purchase_price}

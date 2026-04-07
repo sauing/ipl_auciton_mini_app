@@ -11,6 +11,7 @@ export default function LeagueLobby() {
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
   const [currentUser, setCurrentUser] = useState(null)
+  const [auctionStatus, setAuctionStatus] = useState(null)
 
   const fetchLeagueData = useCallback(async () => {
     try {
@@ -33,11 +34,29 @@ export default function LeagueLobby() {
 
       if (memberError) throw memberError
 
-      const storedUser = localStorage.getItem('auction_user')
-      if (storedUser) {
-        setCurrentUser(JSON.parse(storedUser))
+      const { data: auctionData, error: auctionError } = await supabase
+        .from('auction_state')
+        .select('status')
+        .eq('league_id', leagueId)
+        .maybeSingle()
+
+      if (auctionError) {
+        console.error('Auction state fetch error:', auctionError)
       }
 
+      try {
+        const storedUser = JSON.parse(
+          localStorage.getItem('auction_user') || 'null'
+        )
+
+        if (storedUser) {
+          setCurrentUser(storedUser)
+        }
+      } catch (error) {
+        console.error('Failed to parse auction user:', error)
+      }
+
+      setAuctionStatus(auctionData?.status || null)
       setLeague(leagueData)
       setMembers(memberData || [])
     } catch (error) {
@@ -52,25 +71,6 @@ export default function LeagueLobby() {
   }, [fetchLeagueData])
 
   useEffect(() => {
-    const checkAuctionState = async () => {
-      const { data, error } = await supabase
-        .from('auction_state')
-        .select('*')
-        .eq('league_id', leagueId)
-        .maybeSingle()
-
-      if (error) {
-        console.error('Auction state fetch error:', error)
-        return
-      }
-
-      if (data?.status === 'live') {
-        navigate(`/auction/${leagueId}`)
-      }
-    }
-
-    checkAuctionState()
-
     const auctionChannel = supabase
       .channel(`league-lobby-auction-${leagueId}`)
       .on(
@@ -83,6 +83,8 @@ export default function LeagueLobby() {
         },
         (payload) => {
           const updatedAuction = payload.new
+
+          setAuctionStatus(updatedAuction?.status || null)
 
           if (updatedAuction?.status === 'live') {
             navigate(`/auction/${leagueId}`)
@@ -116,53 +118,81 @@ export default function LeagueLobby() {
   const handleStartAuction = async () => {
     try {
       setMessage('')
-
+  
       if (currentUser?.role !== 'admin') {
         setMessage('Only admin can start the auction')
         return
       }
-
-      const { data: auctionData, error: auctionError } = await supabase
+  
+      if (auctionStatus === 'finished') {
+        setMessage('Auction is already finished')
+        return
+      }
+  
+      const { data: allLeaguePlayers, error: allLeaguePlayersError } = await supabase
+        .from('league_players')
+        .select('id')
+        .eq('league_id', leagueId)
+  
+      if (allLeaguePlayersError) throw allLeaguePlayersError
+  
+      if (!allLeaguePlayers || allLeaguePlayers.length === 0) {
+        setMessage('No players loaded for this league yet. Please open Auction Setup and load players first.')
+        return
+      }
+  
+      const { data: playerData, error: playerError } = await supabase
+        .from('league_players')
+        .select(`
+          id,
+          league_id,
+          player_id,
+          base_price,
+          is_sold,
+          is_unsold,
+          players (
+            id,
+            player_name,
+            ipl_team,
+            role_type
+          )
+        `)
+        .eq('league_id', leagueId)
+        .eq('is_sold', false)
+        .eq('is_unsold', false)
+        .order('base_price', { ascending: false })
+  
+      if (playerError) throw playerError
+  
+      const nextLeaguePlayer = playerData?.[0]
+      const nextPlayer = nextLeaguePlayer?.players
+  
+      if (!nextLeaguePlayer || !nextPlayer) {
+        setMessage('No available players left to auction in this league.')
+        return
+      }
+  
+      const { data: auctionData, error: auctionFetchError } = await supabase
         .from('auction_state')
         .select('*')
         .eq('league_id', leagueId)
         .maybeSingle()
-
-      if (auctionError) throw auctionError
-
-      if (auctionData?.status === 'live') {
-        setMessage('Auction is already live')
-        return
-      }
-
-      const { data: playerData, error: playerError } = await supabase
-        .from('players')
-        .select('*')
-        .eq('is_sold', false)
-        .order('base_price', { ascending: false })
-
-      if (playerError) throw playerError
-
-      const nextPlayer = playerData?.[0]
-
-      if (!nextPlayer) {
-        setMessage('No players left to auction')
-        return
-      }
-
+  
+      if (auctionFetchError) throw auctionFetchError
+  
       if (auctionData) {
         const { error: updateError } = await supabase
           .from('auction_state')
           .update({
             current_player_id: nextPlayer.id,
-            current_bid: nextPlayer.base_price,
+            current_bid: nextLeaguePlayer.base_price,
             current_bidder_id: null,
             status: 'live',
             expires_at: new Date(Date.now() + 15000).toISOString(),
             updated_at: new Date().toISOString(),
           })
           .eq('id', auctionData.id)
-
+  
         if (updateError) throw updateError
       } else {
         const { error: insertError } = await supabase
@@ -171,13 +201,13 @@ export default function LeagueLobby() {
             {
               league_id: leagueId,
               current_player_id: nextPlayer.id,
-              current_bid: nextPlayer.base_price,
+              current_bid: nextLeaguePlayer.base_price,
               current_bidder_id: null,
               status: 'live',
               expires_at: new Date(Date.now() + 15000).toISOString(),
             },
           ])
-
+  
         if (insertError) throw insertError
       }
     } catch (error) {
@@ -201,9 +231,17 @@ export default function LeagueLobby() {
             <h1 className="text-3xl font-bold text-black">
               {league?.league_name || 'League Lobby'}
             </h1>
+
             <p className="mt-1 text-gray-600">
-              Join Code: <span className="font-semibold">{league?.join_code}</span>
+              Join Code:{' '}
+              <span className="font-semibold">{league?.join_code}</span>
             </p>
+
+            {auctionStatus === 'finished' && (
+              <p className="mt-2 font-semibold text-red-600">
+                Auction Closed
+              </p>
+            )}
 
             {currentUser && (
               <div className="mt-3 flex items-center gap-2">
@@ -225,7 +263,7 @@ export default function LeagueLobby() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            {currentUser?.role === 'admin' && (
+            {currentUser?.role === 'admin' && auctionStatus !== 'finished' && (
               <>
                 <button
                   onClick={handleStartAuction}
@@ -235,7 +273,7 @@ export default function LeagueLobby() {
                 </button>
 
                 <Link
-                  to="/auction-setup"
+                  to={`/auction-setup/${leagueId}`}
                   className="rounded bg-purple-600 px-4 py-2 text-white"
                 >
                   Auction Setup
@@ -244,81 +282,51 @@ export default function LeagueLobby() {
             )}
 
             <Link
-              to={`/league/${leagueId}/leaderboard`}
+              to={`/league/${leagueId}/fantasy-leaderboard`}
               className="rounded bg-yellow-600 px-4 py-2 text-white"
             >
-              Leaderboard
-            </Link>
-
-            <Link
-              to={`/league/${leagueId}/winner`}
-              className="rounded bg-green-700 px-4 py-2 text-white"
-            >
-              Winner Screen
+              Fantasy Leaderboard
             </Link>
 
             <button
-              onClick={() => {
-                localStorage.removeItem('auction_user')
-                localStorage.removeItem('joined_league')
-                window.location.href = '/'
-              }}
+              onClick={() => navigate('/join')}
               className="rounded bg-gray-700 px-4 py-2 text-white"
             >
-              Logout
+              Back to Dashboard
             </button>
           </div>
         </div>
 
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-black">
-            Members ({members.length})
-          </h2>
-        </div>
-
         {message && <p className="mb-4 text-red-600">{message}</p>}
 
-        {members.length === 0 ? (
-          <p className="text-gray-600">No members joined yet.</p>
-        ) : (
-          <div className="space-y-3">
-            {members.map((member, index) => (
-              <div
-                key={member.id}
-                className="flex items-center justify-between rounded-lg border border-gray-200 p-4"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-semibold text-black">
-                      {index + 1}. {member.user_name}
-                    </p>
+        <h2 className="mb-4 text-xl font-semibold text-black">
+          Members ({members.length})
+        </h2>
 
-                    <span
-                      className={`rounded px-2 py-1 text-xs font-semibold ${
-                        member.role === 'admin'
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-gray-100 text-gray-700'
-                      }`}
-                    >
-                      {member.role === 'admin' ? 'Admin' : 'Member'}
-                    </span>
-                  </div>
-
-                  <p className="text-sm text-gray-600">
-                    Budget: {member.budget_remaining}
-                  </p>
-                </div>
-
-                <Link
-                  to={`/league/${leagueId}/team/${member.id}`}
-                  className="rounded bg-green-600 px-3 py-1 text-sm text-white"
-                >
-                  View Team
-                </Link>
+        <div className="space-y-3">
+          {members.map((member, index) => (
+            <div
+              key={member.id}
+              className="flex items-center justify-between rounded-lg border border-gray-200 p-4"
+            >
+              <div>
+                <p className="font-semibold text-black">
+                  {index + 1}. {member.user_name}
+                </p>
+                <p className="text-sm text-gray-600">
+                  Budget: {member.budget_remaining}
+                </p>
               </div>
-            ))}
-          </div>
-        )}
+
+              <Link
+                to={`/league/${leagueId}/team/${member.id}`}
+                className="rounded bg-green-600 px-3 py-1 text-sm text-white"
+              >
+                View Team
+              </Link>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )
