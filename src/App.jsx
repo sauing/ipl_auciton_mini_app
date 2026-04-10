@@ -7,7 +7,6 @@ import AuctionSetup from './pages/AuctionSetup'
 import AuctionRoom from './pages/AuctionRoom'
 import TeamPage from './pages/TeamPage'
 import Leaderboard from './pages/Leaderboard'
-import WinnerPage from './pages/WinnerPage'
 import FantasyImport from './pages/FantasyImport'
 import FantasyLeaderboard from './pages/FantasyLeaderboard'
 
@@ -23,7 +22,6 @@ function App() {
       <Route path="/auction/:leagueId" element={<AuctionRoom />} />
       <Route path="/league/:leagueId/team/:memberId" element={<TeamPage />} />
       <Route path="/league/:leagueId/leaderboard" element={<Leaderboard />} />
-      <Route path="/winner/:leagueId" element={<WinnerPage />} />
       <Route path="/fantasy-import/:leagueId" element={<FantasyImport />} />
       <Route
         path="/league/:leagueId/fantasy-leaderboard"

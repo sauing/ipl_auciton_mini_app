@@ -11,6 +11,41 @@ export default function JoinLeague() {
   const [joinedLeague, setJoinedLeague] = useState(null)
   const [auctionFinished, setAuctionFinished] = useState(false)
 
+  function saveLeagueSession(leagueData, memberData, displayName) {
+    localStorage.setItem(
+      'auction_user',
+      JSON.stringify({
+        leagueId: leagueData.id,
+        memberId: memberData.id,
+        name: displayName,
+        role: memberData.role || 'member',
+      })
+    )
+
+    localStorage.setItem(
+      'joined_league',
+      JSON.stringify({
+        id: leagueData.id,
+        league_name: leagueData.league_name,
+        join_code: leagueData.join_code,
+      })
+    )
+
+    setJoinedLeague({
+      id: leagueData.id,
+      league_name: leagueData.league_name,
+      join_code: leagueData.join_code,
+    })
+  }
+
+  function clearLeagueSession(logoutMessage = 'Logged out successfully') {
+    localStorage.removeItem('auction_user')
+    localStorage.removeItem('joined_league')
+    setJoinedLeague(null)
+    setAuctionFinished(false)
+    setMessage(logoutMessage)
+  }
+
   useEffect(() => {
     try {
       const storedUser = JSON.parse(localStorage.getItem('auction_user') || 'null')
@@ -116,30 +151,7 @@ export default function JoinLeague() {
       const isLeagueClosed = auctionData?.status === 'finished'
 
       if (existingMember) {
-        localStorage.setItem(
-          'auction_user',
-          JSON.stringify({
-            leagueId: leagueData.id,
-            memberId: existingMember.id,
-            name: existingMember.user_name,
-            role: existingMember.role || 'member',
-          })
-        )
-
-        localStorage.setItem(
-          'joined_league',
-          JSON.stringify({
-            id: leagueData.id,
-            league_name: leagueData.league_name,
-            join_code: leagueData.join_code,
-          })
-        )
-
-        setJoinedLeague({
-          id: leagueData.id,
-          league_name: leagueData.league_name,
-          join_code: leagueData.join_code,
-        })
+        saveLeagueSession(leagueData, existingMember, existingMember.user_name)
         setAuctionFinished(isLeagueClosed)
         setMessage(`Welcome back, ${existingMember.user_name}`)
         setUserName('')
@@ -164,30 +176,7 @@ export default function JoinLeague() {
 
       if (memberError) throw memberError
 
-      localStorage.setItem(
-        'auction_user',
-        JSON.stringify({
-          leagueId: leagueData.id,
-          memberId: newMember[0].id,
-          name: cleanUserName,
-          role: newMember[0].role || 'member',
-        })
-      )
-
-      localStorage.setItem(
-        'joined_league',
-        JSON.stringify({
-          id: leagueData.id,
-          league_name: leagueData.league_name,
-          join_code: leagueData.join_code,
-        })
-      )
-
-      setJoinedLeague({
-        id: leagueData.id,
-        league_name: leagueData.league_name,
-        join_code: leagueData.join_code,
-      })
+      saveLeagueSession(leagueData, newMember[0], cleanUserName)
       setMessage(`Joined league successfully: ${leagueData.league_name}`)
       setUserName('')
       setJoinCode('')
@@ -282,13 +271,7 @@ export default function JoinLeague() {
             </button>
 
             <button
-              onClick={() => {
-                localStorage.removeItem('auction_user')
-                localStorage.removeItem('joined_league')
-                setJoinedLeague(null)
-                setAuctionFinished(false)
-                setMessage('Logged out successfully')
-              }}
+              onClick={() => clearLeagueSession()}
               className="w-full rounded bg-red-600 px-4 py-3 text-white"
             >
               Logout

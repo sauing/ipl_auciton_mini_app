@@ -2,6 +2,42 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../supabase'
 
+function getStoredJson(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || 'null')
+  } catch (error) {
+    console.error(`Failed to parse ${key} from localStorage:`, error)
+    return null
+  }
+}
+
+function buildLeaderboardData(members = [], teamPlayers = []) {
+  return members
+    .map((member) => {
+      const memberPlayers = teamPlayers.filter(
+        (player) => player.member_id === member.id
+      )
+
+      const totalSpent = memberPlayers.reduce(
+        (sum, player) => sum + (player.purchase_price || 0),
+        0
+      )
+
+      return {
+        ...member,
+        playersBought: memberPlayers.length,
+        totalSpent,
+      }
+    })
+    .sort((a, b) => {
+      if (b.playersBought !== a.playersBought) {
+        return b.playersBought - a.playersBought
+      }
+
+      return a.budget_remaining - b.budget_remaining
+    })
+}
+
 export default function Leaderboard() {
   const { leagueId: routeLeagueId } = useParams()
 
@@ -13,15 +49,11 @@ export default function Leaderboard() {
   const resolvedLeagueId = useMemo(() => {
     if (routeLeagueId) return routeLeagueId
 
-    try {
-      const storedUser = JSON.parse(localStorage.getItem('auction_user') || 'null')
-      if (storedUser?.leagueId) return storedUser.leagueId
+    const storedUser = getStoredJson('auction_user')
+    if (storedUser?.leagueId) return storedUser.leagueId
 
-      const joinedLeague = JSON.parse(localStorage.getItem('joined_league') || 'null')
-      if (joinedLeague?.id) return joinedLeague.id
-    } catch (error) {
-      console.error('Failed to read league id from localStorage:', error)
-    }
+    const joinedLeague = getStoredJson('joined_league')
+    if (joinedLeague?.id) return joinedLeague.id
 
     return null
   }, [routeLeagueId])
@@ -64,31 +96,13 @@ export default function Leaderboard() {
     }
   }
 
-  const leaderboardData = members
-    .map((member) => {
-      const memberPlayers = teamPlayers.filter(
-        (player) => player.member_id === member.id
-      )
+  const leaderboardData = useMemo(() => {
+    return buildLeaderboardData(members, teamPlayers)
+  }, [members, teamPlayers])
 
-      const totalSpent = memberPlayers.reduce(
-        (sum, player) => sum + (player.purchase_price || 0),
-        0
-      )
-
-      return {
-        ...member,
-        playersBought: memberPlayers.length,
-        totalSpent,
-      }
-    })
-    .sort((a, b) => {
-      if (b.playersBought !== a.playersBought) {
-        return b.playersBought - a.playersBought
-      }
-      return a.budget_remaining - b.budget_remaining
-    })
-
-  const backToLobbyLink = resolvedLeagueId ? `/league/${resolvedLeagueId}` : '/join'
+  const backToLobbyLink = resolvedLeagueId
+    ? `/league/${resolvedLeagueId}`
+    : '/join'
 
   if (loading) {
     return (

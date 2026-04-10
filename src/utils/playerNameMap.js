@@ -144,20 +144,3 @@ export const playerNameMap = {
   "j.k singh": "jk singh",
   "j k singh": "jk singh",
 };
-
-export function cleanPlayerName(name) {
-  return String(name || "")
-    .toLowerCase()
-    .replace(/\(c\)|\(wk\)|\(w\/k\)/gi, "")
-    .replace(/\./g, "")
-    .replace(/,/g, " ")
-    .replace(/['`]/g, "")
-    .replace(/-/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-export function normalizeCricsheetPlayerName(rawName) {
-  const cleaned = cleanPlayerName(rawName);
-  return playerNameMap[cleaned] || cleaned;
-}

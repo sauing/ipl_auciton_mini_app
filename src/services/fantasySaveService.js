@@ -62,7 +62,6 @@ export async function saveFantasyMatch({
     matchId = existingMatch.id;
     isExistingMatch = true;
 
-    // IMPORTANT:
     // remove previous rows so final upload replaces points
     const { error: deleteOldStatsError } = await supabase
       .from("player_match_stats")
@@ -75,7 +74,7 @@ export async function saveFantasyMatch({
       );
     }
 
-    // optional update latest raw json
+    // update latest raw json + source
     const { error: updateMatchError } = await supabase
       .from("matches")
       .update({
@@ -114,9 +113,7 @@ export async function saveFantasyMatch({
       .single();
 
     if (matchInsertError) {
-      throw new Error(
-        `Failed to insert match: ${matchInsertError.message}`
-      );
+      throw new Error(`Failed to insert match: ${matchInsertError.message}`);
     }
 
     matchId = insertedMatch.id;
@@ -128,26 +125,22 @@ export async function saveFantasyMatch({
     .select("id, player_name");
 
   if (dbPlayersError) {
-    throw new Error(
-      `Failed to fetch DB players: ${dbPlayersError.message}`
-    );
+    throw new Error(`Failed to fetch DB players: ${dbPlayersError.message}`);
   }
 
   // STEP 4 → lookup map
   const playerLookup = new Map();
 
   for (const dbPlayer of dbPlayers || []) {
-    const normalizedDbName = normalizePlayerName(
-      dbPlayer.player_name
-    );
+    const normalizedDbName = normalizePlayerName(dbPlayer.player_name);
 
     if (!playerLookup.has(normalizedDbName)) {
       playerLookup.set(normalizedDbName, dbPlayer);
     }
   }
 
-  // STEP 5 → build stats rows
-  const statsRows = playersWithPoints.map((player) => {
+  // STEP 5 → build all rows first
+  const allStatsRows = playersWithPoints.map((player) => {
     const originalName = player.player_name || "";
     const normalizedName = normalizePlayerName(originalName);
     const matchedPlayer = playerLookup.get(normalizedName);
@@ -164,58 +157,49 @@ export async function saveFantasyMatch({
       fours: safeNumber(player.fours),
       sixes: safeNumber(player.sixes),
       strike_rate:
-        player.strike_rate != null
-          ? safeNumber(player.strike_rate)
-          : null,
+        player.strike_rate != null ? safeNumber(player.strike_rate) : null,
 
       wickets: safeNumber(player.wickets),
       balls_bowled: safeNumber(player.balls_bowled),
       runs_conceded: safeNumber(player.runs_conceded),
       maidens: safeNumber(player.maidens),
-      economy:
-        player.economy != null
-          ? safeNumber(player.economy)
-          : null,
+      economy: player.economy != null ? safeNumber(player.economy) : null,
 
       catches: safeNumber(player.catches),
       stumpings: safeNumber(player.stumpings),
-      run_outs: safeNumber(
-        player.run_outs ?? player.runouts
-      ),
+      run_outs: safeNumber(player.run_outs ?? player.runouts),
       fantasy_points: safeNumber(player.fantasy_points),
 
       is_matched: !!matchedPlayer,
     };
   });
 
-  // STEP 6 → insert fresh stats
-  const { error: statsInsertError } = await supabase
-    .from("player_match_stats")
-    .insert(statsRows);
+  // STEP 6 → insert only matched rows
+  const statsRows = allStatsRows.filter((row) => row.player_id !== null);
 
-  if (statsInsertError) {
-    throw new Error(
-      `Failed to insert player match stats: ${statsInsertError.message}`
-    );
+  if (statsRows.length > 0) {
+    const { error: statsInsertError } = await supabase
+      .from("player_match_stats")
+      .insert(statsRows);
+
+    if (statsInsertError) {
+      throw new Error(
+        `Failed to insert player match stats: ${statsInsertError.message}`
+      );
+    }
   }
 
-  const matchedPlayers = statsRows.filter(
-    (row) => row.is_matched
-  );
-
-  const unmatchedPlayers = statsRows.filter(
-    (row) => !row.is_matched
-  );
+  // STEP 7 → summary data
+  const matchedPlayers = allStatsRows.filter((row) => row.is_matched);
+  const unmatchedPlayers = allStatsRows.filter((row) => !row.is_matched);
 
   return {
     matchId,
     source: cleanSource,
     replacedExisting: isExistingMatch,
-    totalPlayers: statsRows.length,
+    totalPlayers: allStatsRows.length,
     matchedCount: matchedPlayers.length,
     unmatchedCount: unmatchedPlayers.length,
-    unmatchedPlayers: unmatchedPlayers.map(
-      (row) => row.player_name
-    ),
+    unmatchedPlayers: unmatchedPlayers.map((row) => row.player_name),
   };
 }

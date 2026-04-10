@@ -6,6 +6,27 @@ function generateJoinCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase()
 }
 
+function saveLeagueSession(newLeague, adminMember) {
+  localStorage.setItem(
+    'auction_user',
+    JSON.stringify({
+      leagueId: newLeague.id,
+      memberId: adminMember.id,
+      name: adminMember.user_name,
+      role: adminMember.role || 'admin',
+    })
+  )
+
+  localStorage.setItem(
+    'joined_league',
+    JSON.stringify({
+      id: newLeague.id,
+      league_name: newLeague.league_name,
+      join_code: newLeague.join_code,
+    })
+  )
+}
+
 export default function CreateLeague() {
   const [leagueName, setLeagueName] = useState('')
   const [creatorName, setCreatorName] = useState('')
@@ -55,15 +76,7 @@ export default function CreateLeague() {
 
       const adminMember = memberData[0]
 
-      localStorage.setItem(
-        'auction_user',
-        JSON.stringify({
-          leagueId: newLeague.id,
-          memberId: adminMember.id,
-          name: adminMember.user_name,
-          role: adminMember.role || 'admin',
-        })
-      )
+      saveLeagueSession(newLeague, adminMember)
 
       setCreatedLeague(newLeague)
       setMessage(
