@@ -2,6 +2,21 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 
+const AUCTION_DURATION_MS = 15000
+
+function getStoredAuctionUser() {
+  try {
+    return JSON.parse(localStorage.getItem('auction_user') || 'null')
+  } catch (error) {
+    console.error('Failed to parse auction user:', error)
+    return null
+  }
+}
+
+function getAuctionExpiryIso() {
+  return new Date(Date.now() + AUCTION_DURATION_MS).toISOString()
+}
+
 export default function LeagueLobby() {
   const { leagueId } = useParams()
   const navigate = useNavigate()
@@ -12,6 +27,21 @@ export default function LeagueLobby() {
   const [message, setMessage] = useState('')
   const [currentUser, setCurrentUser] = useState(null)
   const [auctionStatus, setAuctionStatus] = useState(null)
+
+  const fetchAuctionStatus = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('auction_state')
+      .select('status')
+      .eq('league_id', leagueId)
+      .maybeSingle()
+
+    if (error) {
+      console.error('Auction state fetch error:', error)
+      return null
+    }
+
+    return data?.status || null
+  }, [leagueId])
 
   const fetchLeagueData = useCallback(async () => {
     try {
@@ -34,29 +64,14 @@ export default function LeagueLobby() {
 
       if (memberError) throw memberError
 
-      const { data: auctionData, error: auctionError } = await supabase
-        .from('auction_state')
-        .select('status')
-        .eq('league_id', leagueId)
-        .maybeSingle()
+      const status = await fetchAuctionStatus()
+      const storedUser = getStoredAuctionUser()
 
-      if (auctionError) {
-        console.error('Auction state fetch error:', auctionError)
+      if (storedUser) {
+        setCurrentUser(storedUser)
       }
 
-      try {
-        const storedUser = JSON.parse(
-          localStorage.getItem('auction_user') || 'null'
-        )
-
-        if (storedUser) {
-          setCurrentUser(storedUser)
-        }
-      } catch (error) {
-        console.error('Failed to parse auction user:', error)
-      }
-
-      setAuctionStatus(auctionData?.status || null)
+      setAuctionStatus(status)
       setLeague(leagueData)
       setMembers(memberData || [])
     } catch (error) {
@@ -64,7 +79,7 @@ export default function LeagueLobby() {
     } finally {
       setLoading(false)
     }
-  }, [leagueId])
+  }, [leagueId, fetchAuctionStatus])
 
   useEffect(() => {
     fetchLeagueData()
@@ -83,10 +98,11 @@ export default function LeagueLobby() {
         },
         (payload) => {
           const updatedAuction = payload.new
+          const nextStatus = updatedAuction?.status || null
 
-          setAuctionStatus(updatedAuction?.status || null)
+          setAuctionStatus(nextStatus)
 
-          if (updatedAuction?.status === 'live') {
+          if (nextStatus === 'live') {
             navigate(`/auction/${leagueId}`)
           }
         }
@@ -118,29 +134,29 @@ export default function LeagueLobby() {
   const handleStartAuction = async () => {
     try {
       setMessage('')
-  
+
       if (currentUser?.role !== 'admin') {
         setMessage('Only admin can start the auction')
         return
       }
-  
+
       if (auctionStatus === 'finished') {
         setMessage('Auction is already finished')
         return
       }
-  
+
       const { data: allLeaguePlayers, error: allLeaguePlayersError } = await supabase
         .from('league_players')
         .select('id')
         .eq('league_id', leagueId)
-  
+
       if (allLeaguePlayersError) throw allLeaguePlayersError
-  
+
       if (!allLeaguePlayers || allLeaguePlayers.length === 0) {
         setMessage('No players loaded for this league yet. Please open Auction Setup and load players first.')
         return
       }
-  
+
       const { data: playerData, error: playerError } = await supabase
         .from('league_players')
         .select(`
@@ -161,38 +177,42 @@ export default function LeagueLobby() {
         .eq('is_sold', false)
         .eq('is_unsold', false)
         .order('base_price', { ascending: false })
-  
+
       if (playerError) throw playerError
-  
+
       const nextLeaguePlayer = playerData?.[0]
       const nextPlayer = nextLeaguePlayer?.players
-  
+
       if (!nextLeaguePlayer || !nextPlayer) {
         setMessage('No available players left to auction in this league.')
         return
       }
-  
+
       const { data: auctionData, error: auctionFetchError } = await supabase
         .from('auction_state')
         .select('*')
         .eq('league_id', leagueId)
         .maybeSingle()
-  
+
       if (auctionFetchError) throw auctionFetchError
-  
+
+      const baseUpdate = {
+        current_player_id: nextPlayer.id,
+        current_bid: nextLeaguePlayer.base_price,
+        current_bidder_id: null,
+        status: 'live',
+        expires_at: getAuctionExpiryIso(),
+      }
+
       if (auctionData) {
         const { error: updateError } = await supabase
           .from('auction_state')
           .update({
-            current_player_id: nextPlayer.id,
-            current_bid: nextLeaguePlayer.base_price,
-            current_bidder_id: null,
-            status: 'live',
-            expires_at: new Date(Date.now() + 15000).toISOString(),
+            ...baseUpdate,
             updated_at: new Date().toISOString(),
           })
           .eq('id', auctionData.id)
-  
+
         if (updateError) throw updateError
       } else {
         const { error: insertError } = await supabase
@@ -200,14 +220,10 @@ export default function LeagueLobby() {
           .insert([
             {
               league_id: leagueId,
-              current_player_id: nextPlayer.id,
-              current_bid: nextLeaguePlayer.base_price,
-              current_bidder_id: null,
-              status: 'live',
-              expires_at: new Date(Date.now() + 15000).toISOString(),
+              ...baseUpdate,
             },
           ])
-  
+
         if (insertError) throw insertError
       }
     } catch (error) {

@@ -67,6 +67,18 @@ export default function AuctionSetup() {
     return leagueName.includes('ecc')
   }
 
+  function buildLeaguePlayerRow(playerId, basePrice = 0) {
+    return {
+      league_id: leagueId,
+      player_id: playerId,
+      base_price: basePrice,
+      is_sold: false,
+      is_unsold: false,
+      sold_to_member_id: null,
+      sold_price: null,
+    }
+  }
+
   const seedLeaguePlayers = async () => {
     try {
       setSeedingPlayers(true)
@@ -119,15 +131,10 @@ export default function AuctionSetup() {
             if (!matchedDbPlayer) return null
             if (existingPlayerIds.has(matchedDbPlayer.id)) return null
 
-            return {
-              league_id: leagueId,
-              player_id: matchedDbPlayer.id,
-              base_price: eccPlayer.base_price ?? matchedDbPlayer.base_price ?? 0,
-              is_sold: false,
-              is_unsold: false,
-              sold_to_member_id: null,
-              sold_price: null,
-            }
+            return buildLeaguePlayerRow(
+              matchedDbPlayer.id,
+              eccPlayer.base_price ?? matchedDbPlayer.base_price ?? 0
+            )
           })
           .filter(Boolean)
 
@@ -157,15 +164,7 @@ export default function AuctionSetup() {
 
       const playersToInsert = (allPlayers || [])
         .filter((player) => !existingPlayerIds.has(player.id))
-        .map((player) => ({
-          league_id: leagueId,
-          player_id: player.id,
-          base_price: player.base_price ?? 0,
-          is_sold: false,
-          is_unsold: false,
-          sold_to_member_id: null,
-          sold_price: null,
-        }))
+        .map((player) => buildLeaguePlayerRow(player.id, player.base_price ?? 0))
 
       if (playersToInsert.length === 0) {
         setMessage('All available players are already loaded into this league.')

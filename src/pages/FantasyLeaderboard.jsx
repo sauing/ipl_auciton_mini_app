@@ -2,6 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getFantasyLeaderboard } from "../services/fantasyLeaderboardService";
 
+function getStoredJson(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || "null");
+  } catch (err) {
+    console.error(`Failed to parse ${key} from localStorage:`, err);
+    return null;
+  }
+}
+
 export default function FantasyLeaderboard() {
   const navigate = useNavigate();
   const { leagueId: routeLeagueId } = useParams();
@@ -11,32 +20,16 @@ export default function FantasyLeaderboard() {
   const [error, setError] = useState("");
 
   const leagueId = useMemo(() => {
-    let joinedLeagueId = null;
-    let auctionUserLeagueId = null;
+    const savedLeague = getStoredJson("joined_league");
+    const savedUser = getStoredJson("auction_user");
 
-    try {
-      const savedLeague = JSON.parse(
-        localStorage.getItem("joined_league") || "null"
-      );
+    const joinedLeagueId =
+      savedLeague?.id ||
+      savedLeague?.league_id ||
+      savedLeague?.leagueId ||
+      null;
 
-      joinedLeagueId =
-        savedLeague?.id ||
-        savedLeague?.league_id ||
-        savedLeague?.leagueId ||
-        null;
-    } catch (err) {
-      console.error("Failed to parse joined_league from localStorage:", err);
-    }
-
-    try {
-      const savedUser = JSON.parse(
-        localStorage.getItem("auction_user") || "null"
-      );
-
-      auctionUserLeagueId = savedUser?.leagueId || null;
-    } catch (err) {
-      console.error("Failed to parse auction_user from localStorage:", err);
-    }
+    const auctionUserLeagueId = savedUser?.leagueId || null;
 
     return routeLeagueId || joinedLeagueId || auctionUserLeagueId;
   }, [routeLeagueId]);

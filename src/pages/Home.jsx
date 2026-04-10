@@ -5,15 +5,16 @@ export default function Home() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    const stored = localStorage.getItem('auction_user')
+    try {
+      const storedUser = JSON.parse(localStorage.getItem('auction_user') || 'null')
 
-    if (stored) {
-      const user = JSON.parse(stored)
-
-      // redirect to league lobby
-      navigate(`/join`)
+      if (storedUser) {
+        navigate('/join')
+      }
+    } catch (error) {
+      console.error('Failed to parse auction_user from localStorage:', error)
     }
-  }, [])
+  }, [navigate])
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-white text-black p-6">
