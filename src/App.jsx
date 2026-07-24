@@ -1,14 +1,20 @@
-import { Routes, Route } from 'react-router-dom'
-import CreateLeague from './pages/CreateLeague'
-import JoinLeague from './pages/JoinLeague'
-import LeagueLobby from './pages/LeagueLobby'
-import Home from './pages/Home'
-import AuctionSetup from './pages/AuctionSetup'
-import AuctionRoom from './pages/AuctionRoom'
-import TeamPage from './pages/TeamPage'
-import Leaderboard from './pages/Leaderboard'
-import FantasyImport from './pages/FantasyImport'
-import FantasyLeaderboard from './pages/FantasyLeaderboard'
+import { Routes, Route } from "react-router-dom";
+
+import CreateLeague from "./pages/CreateLeague";
+import JoinLeague from "./pages/JoinLeague";
+import LeagueLobby from "./pages/LeagueLobby";
+import Home from "./pages/Home";
+import AuctionSetup from "./pages/AuctionSetup";
+import AuctionRoom from "./pages/AuctionRoom";
+import TeamPage from "./pages/TeamPage";
+import Leaderboard from "./pages/Leaderboard";
+import FantasyImport from "./pages/FantasyImport";
+import FantasyLeaderboard from "./pages/FantasyLeaderboard";
+
+import LiveScoringAdmin from "./pages/LiveScoringAdmin";
+import LiveMatches from "./pages/LiveMatches";
+import LiveMatchLeaderboard from "./pages/LiveMatchLeaderboard";
+import LiveLeagueLeaderboard from "./pages/LiveLeagueLeaderboard";
 
 function App() {
   return (
@@ -18,17 +24,42 @@ function App() {
       <Route path="/join" element={<JoinLeague />} />
 
       <Route path="/league/:leagueId" element={<LeagueLobby />} />
-      <Route path="/auction-setup/:leagueId" element={<AuctionSetup />} />
+      <Route
+        path="/auction-setup/:leagueId"
+        element={<AuctionSetup />}
+      />
       <Route path="/auction/:leagueId" element={<AuctionRoom />} />
-      <Route path="/league/:leagueId/team/:memberId" element={<TeamPage />} />
-      <Route path="/league/:leagueId/leaderboard" element={<Leaderboard />} />
-      <Route path="/fantasy-import/:leagueId" element={<FantasyImport />} />
+      <Route
+        path="/league/:leagueId/team/:memberId"
+        element={<TeamPage />}
+      />
+      <Route
+        path="/league/:leagueId/leaderboard"
+        element={<Leaderboard />}
+      />
+      <Route
+        path="/fantasy-import/:leagueId"
+        element={<FantasyImport />}
+      />
       <Route
         path="/league/:leagueId/fantasy-leaderboard"
         element={<FantasyLeaderboard />}
       />
+      <Route
+        path="/admin/live-scoring"
+        element={<LiveScoringAdmin />}
+      />
+      <Route path="/live-matches" element={<LiveMatches />} />
+      <Route
+        path="/live-match/:matchId"
+        element={<LiveMatchLeaderboard />}
+      />
+      <Route
+        path="/live-league/:matchId"
+        element={<LiveLeagueLeaderboard />}
+      />
     </Routes>
-  )
+  );
 }
 
-export default App
+export default App;
